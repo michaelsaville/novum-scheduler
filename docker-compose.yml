@@ -1,0 +1,35 @@
+services:
+  app:
+    build:
+      context: ./app
+    image: novum-scheduler:local
+    container_name: novum-app
+    restart: unless-stopped
+    ports:
+      - "3008:3000"
+    env_file: .env
+    volumes:
+      - uploads:/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    container_name: novum-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: novum
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: novum
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U novum -d novum"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:
+  uploads:
