@@ -21,6 +21,7 @@ export default async function HomePage() {
       </p>
       <nav className="flex flex-col gap-1 text-sm">
         <a className="underline" href="/board">Board · day view</a>
+        <a className="underline" href="/board/week">Board · week view</a>
         <a className="underline" href="/projects">Projects</a>
         {role === 'admin' && <a className="underline" href="/admin/users">Admin · Users</a>}
         {role === 'admin' && <a className="underline" href="/admin/audit">Admin · Audit log</a>}

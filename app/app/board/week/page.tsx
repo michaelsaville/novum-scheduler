@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
-import Board from './Board';
+import WeekBoard from './WeekBoard';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,18 +26,25 @@ function shiftDateISO(iso: string, deltaDays: number): string {
   return `${y}-${m}-${dd}`;
 }
 
-function humanDateLabel(iso: string): string {
+// Week starts on Monday. Returns the Monday's ISO date for the week
+// containing `iso`. (UTC; Sunday becomes -6, Mon = 0, ... Sat = -5.)
+function mondayOf(iso: string): string {
   const d = new Date(iso + 'T00:00:00.000Z');
-  return d.toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    timeZone: 'UTC',
-  });
+  const day = d.getUTCDay(); // 0 = Sunday, 1 = Monday, ... 6 = Saturday
+  const offset = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + offset);
+  return d.toISOString().slice(0, 10);
 }
 
-export default async function BoardPage({
+function dayLabel(iso: string): { weekday: string; dayNum: string } {
+  const d = new Date(iso + 'T00:00:00.000Z');
+  return {
+    weekday: d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }),
+    dayNum: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }),
+  };
+}
+
+export default async function WeekBoardPage({
   searchParams,
 }: {
   searchParams: Promise<{ date?: string }>;
@@ -48,12 +55,15 @@ export default async function BoardPage({
 
   const sp = await searchParams;
   const requested = sp?.date ?? '';
-  const dateISO = isValidDateISO(requested) ? requested : todayISO();
+  const focus = isValidDateISO(requested) ? requested : todayISO();
   const today = todayISO();
+  const weekStart = mondayOf(focus);
+  const weekDays: string[] = [];
+  for (let i = 0; i < 7; i++) weekDays.push(shiftDateISO(weekStart, i));
 
-  const dayStart = new Date(dateISO + 'T00:00:00.000Z');
-  const dayEnd = new Date(dayStart);
-  dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+  const rangeStart = new Date(weekStart + 'T00:00:00.000Z');
+  const rangeEnd = new Date(weekStart + 'T00:00:00.000Z');
+  rangeEnd.setUTCDate(rangeEnd.getUTCDate() + 7);
 
   const [installers, pool, scheduled] = await Promise.all([
     prisma.user.findMany({
@@ -74,54 +84,55 @@ export default async function BoardPage({
     }),
     prisma.task.findMany({
       where: {
-        scheduledDate: { gte: dayStart, lt: dayEnd },
+        scheduledDate: { gte: rangeStart, lt: rangeEnd },
         assignedInstallerId: { not: null },
       },
-      orderBy: [{ assignedInstallerId: 'asc' }, { scheduledOrder: 'asc' }],
+      orderBy: [{ assignedInstallerId: 'asc' }, { scheduledDate: 'asc' }, { scheduledOrder: 'asc' }],
       include: {
         project: { select: { id: true, name: true, color: true, clientName: true } },
       },
     }),
   ]);
 
+  const dayHeaders = weekDays.map((iso) => ({ iso, ...dayLabel(iso), isToday: iso === today }));
+
   return (
-    <main className="mx-auto flex min-h-screen max-w-[1600px] flex-col gap-4 p-4">
-      <header className="flex flex-wrap items-baseline gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">Board</h1>
+    <main className="mx-auto flex min-h-screen max-w-[1800px] flex-col gap-3 p-3">
+      <header className="flex flex-wrap items-baseline gap-3 px-1">
+        <h1 className="text-2xl font-semibold tracking-tight">Week board</h1>
         <nav className="flex items-center gap-2 text-sm">
           <a
-            href={`/board?date=${shiftDateISO(dateISO, -1)}`}
+            href={`/board/week?date=${shiftDateISO(weekStart, -7)}`}
             className="rounded border border-neutral-300 px-2 py-1 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900"
           >
-            ← Prev
+            ← Prev week
           </a>
           <a
-            href="/board"
+            href="/board/week"
             className="rounded border border-neutral-300 px-2 py-1 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900"
           >
-            Today
+            This week
           </a>
           <a
-            href={`/board?date=${shiftDateISO(dateISO, 1)}`}
+            href={`/board/week?date=${shiftDateISO(weekStart, 7)}`}
             className="rounded border border-neutral-300 px-2 py-1 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-900"
           >
-            Next →
+            Next week →
           </a>
-          <span className="ml-2 font-medium">
-            {humanDateLabel(dateISO)}
-            {dateISO === today && <span className="ml-1 text-xs text-neutral-500">(today)</span>}
+          <span className="ml-2 text-sm font-medium">
+            {dayLabel(weekStart).dayNum} – {dayLabel(weekDays[6]).dayNum}
           </span>
         </nav>
         <div className="ml-auto flex items-center gap-3 text-sm">
-          <a href={`/board/week?date=${dateISO}`} className="underline">Week view</a>
+          <a href={`/board?date=${focus}`} className="underline">Day view</a>
           <a href="/projects" className="underline">Projects</a>
           <a href="/" className="underline">Home</a>
         </div>
       </header>
 
-      <Board
-        dateISO={dateISO}
+      <WeekBoard
         installers={installers}
+        days={dayHeaders}
         initialPool={pool.map(serializeTask)}
         initialScheduled={scheduled.map(serializeTask)}
       />
@@ -148,6 +159,7 @@ function serializeTask(t: DbTask) {
     status: t.status as 'pending' | 'in_progress' | 'done' | 'blocked',
     scheduledOrder: t.scheduledOrder,
     assignedInstallerId: t.assignedInstallerId,
+    scheduledDateISO: t.scheduledDate ? new Date(t.scheduledDate).toISOString().slice(0, 10) : null,
     project: t.project,
   };
 }
