@@ -61,42 +61,59 @@ export default async function MePage() {
   ]);
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-6 p-6">
-      <header className="flex items-baseline justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Today</h1>
-          <p className="text-sm text-neutral-600 dark:text-neutral-400">
+    <>
+      <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-6 p-4 pb-24 sm:p-6 sm:pb-24">
+        <header>
+          <h1 className="text-3xl font-semibold tracking-tight">Today</h1>
+          <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
             {session.user.name} · {start.toDateString()}
           </p>
-        </div>
-        <a href="/account" className="text-sm underline">account</a>
-      </header>
+        </header>
 
-      <Section title={`Today (${today.length})`} emptyText="Nothing scheduled for today.">
-        {today.map((t) => <TaskCard key={t.id} task={t} />)}
-      </Section>
-
-      <Section title={`Coming up (${upcoming.length})`} emptyText="No upcoming work.">
-        {upcoming.map((t) => <TaskCard key={t.id} task={t} showDate />)}
-      </Section>
-
-      {pool.length > 0 && (
-        <Section title={`Assigned but not yet dated (${pool.length})`}>
-          {pool.map((t) => <TaskCard key={t.id} task={t} />)}
+        <Section title={`Today (${today.length})`} emptyText="Nothing scheduled for today.">
+          {today.map((t) => <TaskCard key={t.id} task={t} />)}
         </Section>
-      )}
 
-      <form
-        action={async () => {
-          'use server';
-          await signOut({ redirectTo: '/login' });
-        }}
+        <Section title={`Coming up (${upcoming.length})`} emptyText="No upcoming work.">
+          {upcoming.map((t) => <TaskCard key={t.id} task={t} showDate />)}
+        </Section>
+
+        {pool.length > 0 && (
+          <Section title={`Assigned but not yet dated (${pool.length})`}>
+            {pool.map((t) => <TaskCard key={t.id} task={t} />)}
+          </Section>
+        )}
+      </main>
+
+      <nav
+        className="fixed inset-x-0 bottom-0 z-10 flex items-stretch border-t border-neutral-200 bg-white/95 backdrop-blur supports-[padding:max(0px)]:pb-[env(safe-area-inset-bottom)] dark:border-neutral-800 dark:bg-neutral-950/95"
+        aria-label="Primary"
       >
-        <button type="submit" className="text-xs text-neutral-500 underline hover:text-neutral-700">
-          Sign out
-        </button>
-      </form>
-    </main>
+        <a href="/me" className="flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-sm font-medium">
+          <span aria-hidden>📋</span>
+          <span>Today</span>
+        </a>
+        <a href="/account" className="flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-sm">
+          <span aria-hidden>👤</span>
+          <span>Account</span>
+        </a>
+        <form
+          action={async () => {
+            'use server';
+            await signOut({ redirectTo: '/login' });
+          }}
+          className="flex flex-1"
+        >
+          <button
+            type="submit"
+            className="flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-sm text-neutral-500"
+          >
+            <span aria-hidden>↩</span>
+            <span>Sign out</span>
+          </button>
+        </form>
+      </nav>
+    </>
   );
 }
 
