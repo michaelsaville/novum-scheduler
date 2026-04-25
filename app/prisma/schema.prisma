@@ -40,8 +40,25 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  assignedTasks Task[] @relation("AssignedInstaller")
+  assignedTasks Task[]     @relation("AssignedInstaller")
   notes         Note[]
+  auditLogs     AuditLog[]
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  action     String   // e.g. 'task.create', 'task.move', 'task.status'
+  entityType String   // 'task' | 'project' | 'user' | 'note'
+  entityId   String
+  metadata   Json?    // action-specific payload (before/after, etc.)
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([entityType, entityId, createdAt])
+  @@index([userId, createdAt])
+  @@index([createdAt])
 }
 
 model Project {

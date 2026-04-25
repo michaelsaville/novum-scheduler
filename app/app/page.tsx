@@ -23,6 +23,7 @@ export default async function HomePage() {
         <a className="underline" href="/board">Board · day view</a>
         <a className="underline" href="/projects">Projects</a>
         {role === 'admin' && <a className="underline" href="/admin/users">Admin · Users</a>}
+        {role === 'admin' && <a className="underline" href="/admin/audit">Admin · Audit log</a>}
         <a className="underline" href="/account">Account · change password</a>
       </nav>
       <form

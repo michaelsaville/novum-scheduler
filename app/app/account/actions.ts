@@ -3,6 +3,7 @@
 import bcrypt from 'bcryptjs';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
+import { logAudit } from '@/lib/audit';
 
 export type ChangePasswordState = {
   ok: boolean;
@@ -45,6 +46,12 @@ export async function changePassword(
 
   const newHash = await bcrypt.hash(next, 12);
   await prisma.user.update({ where: { id: user.id }, data: { passwordHash: newHash } });
+  await logAudit({
+    userId: user.id,
+    action: 'user.password_change_self',
+    entityType: 'user',
+    entityId: user.id,
+  });
 
   return { ok: true, error: null, message: 'Password updated.' };
 }

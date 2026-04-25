@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
+import { logAudit } from '@/lib/audit';
 
 export type ProjectFormState = {
   ok: boolean;
@@ -30,7 +31,8 @@ export async function createProject(
   _prev: ProjectFormState,
   formData: FormData,
 ): Promise<ProjectFormState> {
-  if (!(await requireSchedulerOrAdmin())) {
+  const session = await requireSchedulerOrAdmin();
+  if (!session) {
     return { ok: false, error: 'Forbidden' };
   }
 
@@ -52,6 +54,13 @@ export async function createProject(
   const created = await prisma.project.create({
     data: { name, clientName, color, status: 'active' },
   });
+  await logAudit({
+    userId: session.user.id,
+    action: 'project.create',
+    entityType: 'project',
+    entityId: created.id,
+    metadata: { name, clientName },
+  });
 
   revalidatePath('/projects');
   redirect(`/projects/${created.id}`);
@@ -61,7 +70,8 @@ export async function updateProject(
   _prev: ProjectFormState,
   formData: FormData,
 ): Promise<ProjectFormState> {
-  if (!(await requireSchedulerOrAdmin())) {
+  const session = await requireSchedulerOrAdmin();
+  if (!session) {
     return { ok: false, error: 'Forbidden' };
   }
 
@@ -88,6 +98,13 @@ export async function updateProject(
     where: { id },
     data: { name, clientName, color, status },
   });
+  await logAudit({
+    userId: session.user.id,
+    action: 'project.update',
+    entityType: 'project',
+    entityId: id,
+    metadata: { name, status },
+  });
 
   revalidatePath('/projects');
   revalidatePath(`/projects/${id}`);
@@ -95,7 +112,8 @@ export async function updateProject(
 }
 
 export async function archiveProject(formData: FormData) {
-  if (!(await requireSchedulerOrAdmin())) {
+  const session = await requireSchedulerOrAdmin();
+  if (!session) {
     return;
   }
   const id = String(formData.get('id') ?? '');
@@ -105,6 +123,12 @@ export async function archiveProject(formData: FormData) {
   await prisma.project.update({
     where: { id },
     data: { archivedAt: archive ? new Date() : null },
+  });
+  await logAudit({
+    userId: session.user.id,
+    action: archive ? 'project.archive' : 'project.unarchive',
+    entityType: 'project',
+    entityId: id,
   });
   revalidatePath('/projects');
   revalidatePath(`/projects/${id}`);

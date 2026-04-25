@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { generatePassword } from '@/lib/passwords';
+import { logAudit } from '@/lib/audit';
 
 export type AdminUserState = {
   ok: boolean;
@@ -36,7 +37,8 @@ export async function createUser(
   _prev: AdminUserState,
   formData: FormData,
 ): Promise<AdminUserState> {
-  if (!(await requireAdmin())) {
+  const session = await requireAdmin();
+  if (!session) {
     return { ...initialState, error: 'Forbidden' };
   }
 
@@ -67,8 +69,15 @@ export async function createUser(
   const password = generatePassword();
   const passwordHash = await bcrypt.hash(password, 12);
 
-  await prisma.user.create({
+  const created = await prisma.user.create({
     data: { username, name, role, color, passwordHash },
+  });
+  await logAudit({
+    userId: session.user.id,
+    action: 'user.create',
+    entityType: 'user',
+    entityId: created.id,
+    metadata: { username, name, role },
   });
 
   revalidatePath('/admin/users');
@@ -84,7 +93,8 @@ export async function resetPassword(
   _prev: AdminUserState,
   formData: FormData,
 ): Promise<AdminUserState> {
-  if (!(await requireAdmin())) {
+  const session = await requireAdmin();
+  if (!session) {
     return { ...initialState, error: 'Forbidden' };
   }
 
@@ -97,6 +107,13 @@ export async function resetPassword(
   const password = generatePassword();
   const passwordHash = await bcrypt.hash(password, 12);
   await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+  await logAudit({
+    userId: session.user.id,
+    action: 'user.password_reset',
+    entityType: 'user',
+    entityId: user.id,
+    metadata: { username: user.username },
+  });
 
   revalidatePath('/admin/users');
   return {
@@ -126,6 +143,13 @@ export async function setActive(
     where: { id: userId },
     data: { active },
   });
+  await logAudit({
+    userId: session.user.id,
+    action: active ? 'user.activate' : 'user.deactivate',
+    entityType: 'user',
+    entityId: user.id,
+    metadata: { username: user.username },
+  });
 
   revalidatePath('/admin/users');
   return {
@@ -152,9 +176,17 @@ export async function setRole(
     return { ...initialState, error: 'You cannot demote your own account.' };
   }
 
+  const before = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
   const user = await prisma.user.update({
     where: { id: userId },
     data: { role },
+  });
+  await logAudit({
+    userId: session.user.id,
+    action: 'user.role_change',
+    entityType: 'user',
+    entityId: user.id,
+    metadata: { username: user.username, from: before?.role, to: role },
   });
 
   revalidatePath('/admin/users');
@@ -170,7 +202,8 @@ export async function setColor(
   _prev: AdminUserState,
   formData: FormData,
 ): Promise<AdminUserState> {
-  if (!(await requireAdmin())) {
+  const session = await requireAdmin();
+  if (!session) {
     return { ...initialState, error: 'Forbidden' };
   }
 
@@ -185,6 +218,13 @@ export async function setColor(
   const user = await prisma.user.update({
     where: { id: userId },
     data: { color },
+  });
+  await logAudit({
+    userId: session.user.id,
+    action: 'user.color_change',
+    entityType: 'user',
+    entityId: user.id,
+    metadata: { username: user.username, color },
   });
 
   revalidatePath('/admin/users');

@@ -2,6 +2,7 @@ import { notFound, redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { setTaskStatus } from '@/app/tasks/actions';
+import { describeAuditEvent, type AuditAction } from '@/lib/audit';
 import AddNoteForm from './AddNoteForm';
 
 export const dynamic = 'force-dynamic';
@@ -49,6 +50,15 @@ export default async function TaskDetailPage({
   });
 
   if (!task) notFound();
+
+  // Audit timeline for this task. Notes are already a section above so
+  // we filter note.create out to avoid duplication.
+  const auditEvents = await prisma.auditLog.findMany({
+    where: { entityType: 'task', entityId: id, action: { not: 'note.create' } },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+    include: { user: { select: { name: true } } },
+  });
 
   const role = session.user.role;
   const isAssigned = task.assignedInstallerId === session.user.id;
@@ -182,6 +192,27 @@ export default async function TaskDetailPage({
           </p>
         )}
       </section>
+
+      {auditEvents.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-lg font-medium">Activity</h2>
+          <ol className="divide-y divide-neutral-200 rounded border border-neutral-200 text-sm dark:divide-neutral-800 dark:border-neutral-800">
+            {auditEvents.map((e) => (
+              <li key={e.id} className="flex items-start gap-3 px-3 py-2">
+                <span className="text-xs text-neutral-500 whitespace-nowrap">
+                  {formatDateTime(e.createdAt)}
+                </span>
+                <span>
+                  <strong>{e.user.name}</strong>{' '}
+                  <span className="text-neutral-600 dark:text-neutral-400">
+                    {describeAuditEvent(e.action as AuditAction, e.metadata as Record<string, unknown> | null)}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
     </main>
   );
 }

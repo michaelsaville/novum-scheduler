@@ -9,6 +9,7 @@ import {
   PHOTO_MAX_BYTES,
   PHOTO_ALLOWED_MIME,
 } from '@/lib/uploads';
+import { logAudit } from '@/lib/audit';
 
 export type TaskFormState = {
   ok: boolean;
@@ -34,7 +35,8 @@ export async function createTask(
   _prev: TaskFormState,
   formData: FormData,
 ): Promise<TaskFormState> {
-  if (!(await requireSchedulerOrAdmin())) {
+  const session = await requireSchedulerOrAdmin();
+  if (!session) {
     return { ok: false, error: 'Forbidden' };
   }
 
@@ -50,8 +52,15 @@ export async function createTask(
   const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) return { ok: false, error: 'Project not found.' };
 
-  await prisma.task.create({
+  const created = await prisma.task.create({
     data: { projectId, title, description },
+  });
+  await logAudit({
+    userId: session.user.id,
+    action: 'task.create',
+    entityType: 'task',
+    entityId: created.id,
+    metadata: { title, projectId },
   });
 
   revalidatePath(`/projects/${projectId}`);
@@ -62,7 +71,8 @@ export async function updateTask(
   _prev: TaskFormState,
   formData: FormData,
 ): Promise<TaskFormState> {
-  if (!(await requireSchedulerOrAdmin())) {
+  const session = await requireSchedulerOrAdmin();
+  if (!session) {
     return { ok: false, error: 'Forbidden' };
   }
 
@@ -80,22 +90,45 @@ export async function updateTask(
   const existing = await prisma.task.findUnique({ where: { id } });
   if (!existing) return { ok: false, error: 'Task not found.' };
 
+  const fields: string[] = [];
+  if (existing.title !== title) fields.push('title');
+  if (existing.description !== description) fields.push('description');
+  if (existing.status !== status) fields.push('status');
+
   await prisma.task.update({
     where: { id },
     data: { title, description, status },
   });
+  if (fields.length > 0) {
+    await logAudit({
+      userId: session.user.id,
+      action: 'task.update',
+      entityType: 'task',
+      entityId: id,
+      metadata: { fields, statusFrom: existing.status, statusTo: status },
+    });
+  }
 
   revalidatePath(`/projects/${existing.projectId}`);
+  revalidatePath(`/tasks/${id}`);
   return { ok: true, error: null };
 }
 
 export async function deleteTask(formData: FormData) {
-  if (!(await requireSchedulerOrAdmin())) return;
+  const session = await requireSchedulerOrAdmin();
+  if (!session) return;
   const id = String(formData.get('id') ?? '');
   if (!id) return;
   const existing = await prisma.task.findUnique({ where: { id } });
   if (!existing) return;
   await prisma.task.delete({ where: { id } });
+  await logAudit({
+    userId: session.user.id,
+    action: 'task.delete',
+    entityType: 'task',
+    entityId: id,
+    metadata: { title: existing.title, projectId: existing.projectId },
+  });
   revalidatePath(`/projects/${existing.projectId}`);
 }
 
@@ -111,7 +144,7 @@ export async function setTaskStatus(formData: FormData) {
 
   const task = await prisma.task.findUnique({
     where: { id: taskId },
-    select: { id: true, assignedInstallerId: true, projectId: true },
+    select: { id: true, assignedInstallerId: true, projectId: true, status: true },
   });
   if (!task) return;
 
@@ -119,10 +152,18 @@ export async function setTaskStatus(formData: FormData) {
   const isAssigned = task.assignedInstallerId === session.user.id;
   const allowed = role === 'admin' || role === 'scheduler' || isAssigned;
   if (!allowed) return;
+  if (task.status === status) return;
 
   await prisma.task.update({
     where: { id: task.id },
     data: { status },
+  });
+  await logAudit({
+    userId: session.user.id,
+    action: 'task.status',
+    entityType: 'task',
+    entityId: task.id,
+    metadata: { from: task.status, to: status },
   });
 
   revalidatePath('/me');
@@ -201,7 +242,7 @@ export async function createNote(
   }
 
   // One transaction for note + all photos. Disk writes already done.
-  await prisma.$transaction(async (tx) => {
+  const noteId = await prisma.$transaction(async (tx) => {
     const note = await tx.note.create({
       data: {
         taskId,
@@ -222,6 +263,14 @@ export async function createNote(
         })),
       });
     }
+    return note.id;
+  });
+  await logAudit({
+    userId: session.user.id,
+    action: 'note.create',
+    entityType: 'task',
+    entityId: taskId,
+    metadata: { noteId, photoCount: processedPhotos.length, hasBody: body.length > 0 },
   });
 
   revalidatePath(`/tasks/${taskId}`);
@@ -256,7 +305,8 @@ export async function moveTask(args: {
   // The action will rewrite scheduledOrder for every id in this list.
   destOrderedTaskIds?: string[];
 }): Promise<MoveTaskResult> {
-  if (!(await requireSchedulerOrAdmin())) {
+  const session = await requireSchedulerOrAdmin();
+  if (!session) {
     return { ok: false, error: 'Forbidden' };
   }
 
@@ -280,8 +330,16 @@ export async function moveTask(args: {
         assignedInstallerId: null,
       },
     });
+    await logAudit({
+      userId: session.user.id,
+      action: 'task.move',
+      entityType: 'task',
+      entityId: task.id,
+      metadata: { target: { kind: 'pool' } },
+    });
     revalidatePath('/board');
     revalidatePath(`/projects/${task.projectId}`);
+    revalidatePath(`/tasks/${task.id}`);
     return { ok: true };
   }
 
@@ -291,7 +349,7 @@ export async function moveTask(args: {
 
   const installer = await prisma.user.findUnique({
     where: { id: installerId },
-    select: { id: true, role: true, active: true },
+    select: { id: true, name: true, role: true, active: true },
   });
   if (!installer || !installer.active || installer.role !== 'installer') {
     return { ok: false, error: 'Installer not available.' };
@@ -317,8 +375,16 @@ export async function moveTask(args: {
       }),
     ),
   );
+  await logAudit({
+    userId: session.user.id,
+    action: 'task.move',
+    entityType: 'task',
+    entityId: task.id,
+    metadata: { target: { kind: 'column', installerName: installer.name, dateISO } },
+  });
 
   revalidatePath('/board');
   revalidatePath(`/projects/${task.projectId}`);
+  revalidatePath(`/tasks/${task.id}`);
   return { ok: true };
 }
