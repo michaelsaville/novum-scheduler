@@ -20,7 +20,7 @@ export default async function HomePage() {
         Welcome, {session.user.name} ({role}).
       </p>
       <nav className="flex flex-col gap-1 text-sm">
-        <a className="underline" href="/board">Board (coming Sprint 2)</a>
+        <a className="underline" href="/board">Board · day view</a>
         <a className="underline" href="/projects">Projects</a>
         {role === 'admin' && <a className="underline" href="/admin/users">Admin · Users</a>}
         <a className="underline" href="/account">Account · change password</a>
@@ -38,7 +38,7 @@ export default async function HomePage() {
           Sign out
         </button>
       </form>
-      <p className="text-xs text-neutral-500">Build: 0.2.0 · Sprint 1</p>
+      <p className="text-xs text-neutral-500">Build: 0.3.0 · Sprint 2</p>
     </main>
   );
 }
