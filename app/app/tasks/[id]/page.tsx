@@ -38,6 +38,10 @@ export default async function TaskDetailPage({
         orderBy: { createdAt: 'asc' },
         include: {
           user: { select: { id: true, name: true, username: true } },
+          photos: {
+            orderBy: { createdAt: 'asc' },
+            select: { id: true, width: true, height: true },
+          },
         },
       },
     },
@@ -119,7 +123,30 @@ export default async function TaskDetailPage({
                     {formatDateTime(n.createdAt)}
                   </span>
                 </div>
-                <p className="mt-1 whitespace-pre-wrap text-sm">{n.body}</p>
+                {n.body && <p className="mt-1 whitespace-pre-wrap text-sm">{n.body}</p>}
+                {n.photos.length > 0 && (
+                  <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {n.photos.map((p) => (
+                      <a
+                        key={p.id}
+                        href={`/api/photos/${p.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block overflow-hidden rounded border border-neutral-200 dark:border-neutral-700"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={`/api/photos/${p.id}`}
+                          alt=""
+                          loading="lazy"
+                          width={p.width}
+                          height={p.height}
+                          className="h-full w-full object-cover"
+                        />
+                      </a>
+                    ))}
+                  </div>
+                )}
               </li>
             ))}
           </ol>

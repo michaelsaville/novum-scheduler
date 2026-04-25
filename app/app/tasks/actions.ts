@@ -1,8 +1,14 @@
 'use server';
 
+import { randomUUID } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
+import {
+  processAndStorePhoto,
+  PHOTO_MAX_BYTES,
+  PHOTO_ALLOWED_MIME,
+} from '@/lib/uploads';
 
 export type TaskFormState = {
   ok: boolean;
@@ -111,7 +117,6 @@ export async function createNote(
   const body = String(formData.get('body') ?? '').trim();
 
   if (!taskId) return { ok: false, error: 'Missing task.' };
-  if (body.length < 1) return { ok: false, error: 'Note cannot be empty.' };
   if (body.length > 4000) return { ok: false, error: 'Note too long (max 4000 chars).' };
 
   const task = await prisma.task.findUnique({
@@ -125,8 +130,66 @@ export async function createNote(
     return { ok: false, error: 'Not your task.' };
   }
 
-  await prisma.note.create({
-    data: { taskId, userId: session.user.id, body },
+  // Collect photo files. Empty file inputs come through as zero-byte
+  // File objects, which we filter out before validation.
+  const rawPhotos = formData.getAll('photos').filter((v): v is File => v instanceof File && v.size > 0);
+
+  if (body.length < 1 && rawPhotos.length === 0) {
+    return { ok: false, error: 'Note must include text or at least one photo.' };
+  }
+  for (const f of rawPhotos) {
+    if (!PHOTO_ALLOWED_MIME.includes(f.type)) {
+      return { ok: false, error: `Unsupported photo type: ${f.type || 'unknown'}.` };
+    }
+    if (f.size > PHOTO_MAX_BYTES) {
+      return { ok: false, error: `Photo "${f.name}" is too large (max 15MB pre-resize).` };
+    }
+  }
+
+  // Process photos to disk first. If any fails, abort before creating
+  // the note — keeps the DB clean (the only leak is a half-written
+  // jpg on disk, which is harmless).
+  const processedPhotos: Array<{
+    id: string;
+    filename: string;
+    width: number;
+    height: number;
+    sizeBytes: number;
+  }> = [];
+  for (const file of rawPhotos) {
+    const buf = Buffer.from(await file.arrayBuffer());
+    const photoId = randomUUID();
+    try {
+      const info = await processAndStorePhoto(buf, photoId);
+      processedPhotos.push({ id: photoId, ...info });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'unknown error';
+      return { ok: false, error: `Could not process "${file.name}": ${msg}` };
+    }
+  }
+
+  // One transaction for note + all photos. Disk writes already done.
+  await prisma.$transaction(async (tx) => {
+    const note = await tx.note.create({
+      data: {
+        taskId,
+        userId: session.user.id,
+        // Empty body is allowed if photos are present; store as empty string.
+        body: body.length > 0 ? body : '',
+      },
+    });
+    if (processedPhotos.length > 0) {
+      await tx.notePhoto.createMany({
+        data: processedPhotos.map((p) => ({
+          id: p.id,
+          noteId: note.id,
+          path: p.filename,
+          width: p.width,
+          height: p.height,
+          sizeBytes: p.sizeBytes,
+        })),
+      });
+    }
   });
 
   revalidatePath(`/tasks/${taskId}`);
