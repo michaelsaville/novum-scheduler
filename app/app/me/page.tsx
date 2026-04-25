@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { auth, signOut } from '@/auth';
 import { prisma } from '@/lib/prisma';
+import { setTaskStatus } from '@/app/tasks/actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,13 +25,12 @@ export default async function MePage() {
       where: {
         assignedInstallerId: userId,
         scheduledDate: { gte: start, lt: end },
-        status: { not: 'done' },
       },
       include: {
         project: { select: { name: true, color: true, clientName: true } },
         _count: { select: { notes: true } },
       },
-      orderBy: [{ scheduledOrder: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [{ status: 'asc' }, { scheduledOrder: 'asc' }, { createdAt: 'asc' }],
     }),
     prisma.task.findMany({
       where: {
@@ -71,7 +71,7 @@ export default async function MePage() {
         </header>
 
         <Section title={`Today (${today.length})`} emptyText="Nothing scheduled for today.">
-          {today.map((t) => <TaskCard key={t.id} task={t} />)}
+          {today.map((t) => <TaskCard key={t.id} task={t} showQuickActions />)}
         </Section>
 
         <Section title={`Coming up (${upcoming.length})`} emptyText="No upcoming work.">
@@ -150,33 +150,92 @@ type TaskCardProps = {
     _count: { notes: number };
   };
   showDate?: boolean;
+  showQuickActions?: boolean;
 };
 
-function TaskCard({ task, showDate }: TaskCardProps) {
+function TaskCard({ task, showDate, showQuickActions }: TaskCardProps) {
   const dateLabel = task.scheduledDate
     ? new Date(task.scheduledDate).toISOString().slice(0, 10)
     : null;
+  const isDone = task.status === 'done';
+
   return (
-    <a
-      href={`/tasks/${task.id}`}
-      className="block rounded border border-neutral-200 bg-white p-3 hover:border-neutral-400 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-600"
+    <article
+      className={`rounded border bg-white dark:bg-neutral-900 ${
+        isDone
+          ? 'border-neutral-200 opacity-60 dark:border-neutral-800'
+          : 'border-neutral-200 dark:border-neutral-800'
+      }`}
     >
-      <div className="flex items-center gap-2">
-        {task.project.color && <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: task.project.color }} />}
-        <span className="text-xs text-neutral-500">
-          {task.project.name}{task.project.clientName ? ` · ${task.project.clientName}` : ''}
-        </span>
-        {showDate && dateLabel && <span className="ml-auto text-xs text-neutral-500">{dateLabel}</span>}
-      </div>
-      <h3 className="mt-1 font-medium">{task.title}</h3>
-      {task.description && (
-        <p className="mt-1 whitespace-pre-wrap text-sm text-neutral-600 dark:text-neutral-400">
-          {task.description}
-        </p>
+      <a href={`/tasks/${task.id}`} className="block p-3">
+        <div className="flex items-center gap-2">
+          {task.project.color && <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: task.project.color }} />}
+          <span className="text-xs text-neutral-500 truncate">
+            {task.project.name}{task.project.clientName ? ` · ${task.project.clientName}` : ''}
+          </span>
+          {showDate && dateLabel && <span className="ml-auto text-xs text-neutral-500">{dateLabel}</span>}
+        </div>
+        <h3 className={`mt-1 font-medium ${isDone ? 'line-through' : ''}`}>{task.title}</h3>
+        {task.description && (
+          <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-sm text-neutral-600 dark:text-neutral-400">
+            {task.description}
+          </p>
+        )}
+        <div className="mt-1 flex items-center gap-3 text-xs text-neutral-500">
+          {task._count.notes > 0 && <span>💬 {task._count.notes}</span>}
+          {task.status === 'in_progress' && <span className="text-blue-700 dark:text-blue-300">▶ in progress</span>}
+          {task.status === 'blocked' && <span className="text-red-700 dark:text-red-300">⏸ blocked</span>}
+          {task.status === 'done' && <span>✓ done</span>}
+        </div>
+      </a>
+      {showQuickActions && (
+        <div className="flex gap-2 border-t border-neutral-200 px-3 py-2 dark:border-neutral-800">
+          {task.status === 'pending' && (
+            <StatusButton taskId={task.id} status="in_progress" label="Start →" primary />
+          )}
+          {task.status === 'in_progress' && (
+            <StatusButton taskId={task.id} status="done" label="✓ Mark done" primary />
+          )}
+          {task.status === 'done' && (
+            <StatusButton taskId={task.id} status="in_progress" label="Reopen" />
+          )}
+          {task.status !== 'done' && task.status !== 'blocked' && (
+            <StatusButton taskId={task.id} status="blocked" label="⏸ Blocked" />
+          )}
+          {task.status === 'blocked' && (
+            <StatusButton taskId={task.id} status="in_progress" label="Resume" />
+          )}
+        </div>
       )}
-      {task._count.notes > 0 && (
-        <p className="mt-1 text-xs text-neutral-500">💬 {task._count.notes} note{task._count.notes === 1 ? '' : 's'}</p>
-      )}
-    </a>
+    </article>
+  );
+}
+
+function StatusButton({
+  taskId,
+  status,
+  label,
+  primary = false,
+}: {
+  taskId: string;
+  status: 'pending' | 'in_progress' | 'done' | 'blocked';
+  label: string;
+  primary?: boolean;
+}) {
+  return (
+    <form action={setTaskStatus} className="inline">
+      <input type="hidden" name="taskId" value={taskId} />
+      <input type="hidden" name="status" value={status} />
+      <button
+        type="submit"
+        className={
+          primary
+            ? 'rounded bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white'
+            : 'rounded border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800'
+        }
+      >
+        {label}
+      </button>
+    </form>
   );
 }

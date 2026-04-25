@@ -99,6 +99,38 @@ export async function deleteTask(formData: FormData) {
   revalidatePath(`/projects/${existing.projectId}`);
 }
 
+// ── Status quick-change (used by /me + /tasks/[id]) ───────────────────
+
+export async function setTaskStatus(formData: FormData) {
+  const session = await auth();
+  if (!session?.user?.id) return;
+
+  const taskId = String(formData.get('taskId') ?? '');
+  const status = String(formData.get('status') ?? '');
+  if (!taskId || !isStatus(status)) return;
+
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { id: true, assignedInstallerId: true, projectId: true },
+  });
+  if (!task) return;
+
+  const role = session.user.role;
+  const isAssigned = task.assignedInstallerId === session.user.id;
+  const allowed = role === 'admin' || role === 'scheduler' || isAssigned;
+  if (!allowed) return;
+
+  await prisma.task.update({
+    where: { id: task.id },
+    data: { status },
+  });
+
+  revalidatePath('/me');
+  revalidatePath(`/tasks/${task.id}`);
+  revalidatePath('/board');
+  revalidatePath(`/projects/${task.projectId}`);
+}
+
 // ── Notes ─────────────────────────────────────────────────────────────
 
 export type NoteFormState = {

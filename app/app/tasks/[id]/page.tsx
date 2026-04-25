@@ -1,6 +1,7 @@
 import { notFound, redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
+import { setTaskStatus } from '@/app/tasks/actions';
 import AddNoteForm from './AddNoteForm';
 
 export const dynamic = 'force-dynamic';
@@ -96,6 +97,27 @@ export default async function TaskDetailPage({
             <span>unassigned</span>
           )}
         </div>
+        {canPostNote && (
+          <form action={setTaskStatus} className="mt-2 flex flex-wrap items-center gap-2">
+            <input type="hidden" name="taskId" value={task.id} />
+            {(['pending', 'in_progress', 'done', 'blocked'] as const).map((s) => (
+              <button
+                key={s}
+                type="submit"
+                name="status"
+                value={s}
+                disabled={task.status === s}
+                className={`rounded px-2.5 py-1 text-xs disabled:cursor-default ${
+                  task.status === s
+                    ? 'bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900'
+                    : 'border border-neutral-300 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800'
+                }`}
+              >
+                {s.replace('_', ' ')}
+              </button>
+            ))}
+          </form>
+        )}
         <div className="mt-1 text-xs">
           <a href={role === 'installer' ? '/me' : `/projects/${task.project.id}`} className="underline">
             ← Back to {role === 'installer' ? 'today' : 'project'}
