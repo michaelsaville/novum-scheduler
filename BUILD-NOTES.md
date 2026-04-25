@@ -125,3 +125,57 @@ Append-only build log. Newest entries at the bottom. If it isn't here, it's undo
 - ✅ Sprint 1 part 1 (auth + seeded users) deployed live.
 - ⏭ Sprint 1 part 2: `/admin/users` panel (create/edit/disable, password reset), `/account` (self-serve password change), projects CRUD, tasks CRUD.
 - ⏭ Sprint 2: dnd-kit board.
+
+---
+
+## 2026-04-25 — Sprint 1 part 2: /account + /admin/users + projects/tasks CRUD + /me
+
+**What shipped this session**
+- `/account` — self-serve password change. 12-char minimum, must differ from current. Uses `useActionState` for inline error/success.
+- `/admin/users` — admin-only panel. Create user (auto-generates one-time password and reveals it once via `useActionState` return), reset password (same reveal pattern), enable/disable, change role, change board color. Self-disable and self-demote both blocked at the action layer.
+- `/projects` — list active + archived projects with task counts. Inline create form. Per-project click-through to detail.
+- `/projects/[id]` — edit name/client/color/status, archive/unarchive, list tasks split into "in pool" (no scheduledDate yet) and "scheduled" buckets. Inline add-task form, per-row inline edit with optimistic `useActionState` save, delete.
+- `/me` — installer Today view. Today / Coming up / Assigned but undated. Read-only. Will populate once Sprint 2 board lets schedulers assign tasks.
+
+**Critical fix discovered along the way**
+- **Custom JWT claims weren't visible at the edge**. The `authorized` callback in `auth.config.ts` runs in middleware (edge runtime); the `session` callback in `auth.ts` only runs on the Node side. `auth?.user?.role` was therefore `undefined` in middleware → admin-gated routes 307'd even for admin users. Fix: moved `jwt` and `session` callbacks from `auth.ts` into `auth.config.ts`. Auth.js v5 requires the session callback to be edge-safe (and in authConfig) for custom claims to flow through middleware. **General rule for this stack**: all callbacks belong in `auth.config.ts`; `auth.ts` only adds the Credentials provider (which uses prisma + bcrypt and is Node-only).
+
+**Server-action conventions used**
+- All actions return `{ ok, error, message, ... }` shape consumed by `useActionState`.
+- `requireAdmin()` / `requireSchedulerOrAdmin()` helpers at the top of each actions file gate writes.
+- `revalidatePath()` after every mutation so server components refresh.
+- One-time password reveal: action returns `reveal: { username, password }` in its state — client renders it inline. Password lives only in React state until a refresh; never in the URL or a cookie.
+
+**Prisma schema notes**
+- No schema change in this part. Status strings (`pending|in_progress|done|blocked` on Task; `active|on_hold|done` on Project) validated client-side via narrow union `as const` arrays + `isStatus()` type guards.
+
+**Authorization rules summary (now fully wired end-to-end)**
+- `/login`, `/api/auth` → public
+- `/admin/*` → admin only (page-level redirect to `/` for non-admin; middleware also blocks)
+- `/projects`, `/projects/[id]`, `/board` → admin or scheduler (page redirects installer → `/me`; middleware also blocks)
+- `/me`, `/account`, `/` → any logged-in user
+- All redirects on auth failure go to `/login?callbackUrl=…`
+
+**File map added this session**
+- `app/lib/passwords.ts` — `generatePassword()` (18-char base64url) shared by seed + admin actions.
+- `app/app/account/{page,AccountForm,actions}.{tsx,ts}`
+- `app/app/admin/users/{page,CreateUserForm,UserRow,actions}.{tsx,ts}`
+- `app/app/projects/{page,CreateProjectForm,actions}.{tsx,ts}`
+- `app/app/projects/[id]/{page,EditProjectForm,CreateTaskForm,TaskRow}.tsx`
+- `app/app/tasks/actions.ts` (importable from project detail row + future board)
+- `app/app/me/page.tsx`
+
+**Verification**
+- Login flow unchanged ✅
+- `/account` GET 200 (auth), 307 unauth ✅
+- `/admin/users` GET 200 admin, 307 installer (chris) ✅
+- `/projects` GET 200 admin, 307 installer ✅
+- `/projects/[id]` renders edit form + pool/scheduled tasks ✅
+- `/me` 200 for installer with empty Today + Sign out ✅
+- No `[auth][error]` lines, no compile warnings ✅
+
+**Status at end of this part**
+- ✅ Sprint 1 fully complete.
+- ⏭ Sprint 2: dnd-kit board (`/board`). Project pool → installer columns, drag to schedule, drag between dates/installers, ordering. Will reuse the actions in `tasks/actions.ts` for persistence.
+- ⏭ Sprint 3: photos + PWA + mobile polish (Notes thread already has the schema plumbing; UI not yet built).
+- 🟡 `/me` will look empty until the board ships and the scheduler assigns tasks.
