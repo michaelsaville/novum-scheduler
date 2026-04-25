@@ -92,3 +92,96 @@ export async function deleteTask(formData: FormData) {
   await prisma.task.delete({ where: { id } });
   revalidatePath(`/projects/${existing.projectId}`);
 }
+
+// ── Board / drag-drop scheduling ─────────────────────────────────────────
+
+export type MoveTaskResult = { ok: boolean; error?: string };
+
+export type MoveTaskTarget =
+  | { kind: 'pool' }
+  | { kind: 'column'; installerId: string; dateISO: string };
+
+// Date is interpreted as a calendar day in UTC (yyyy-mm-dd). The board
+// stores tasks by date-only; the time portion is always 00:00 UTC so
+// equality checks across timezones stay deterministic.
+function parseBoardDate(dateISO: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return null;
+  const d = new Date(dateISO + 'T00:00:00.000Z');
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+export async function moveTask(args: {
+  taskId: string;
+  target: MoveTaskTarget;
+  // For column targets: full ordered list of task ids in the destination
+  // column AFTER the move (including the moved task at its new index).
+  // The action will rewrite scheduledOrder for every id in this list.
+  destOrderedTaskIds?: string[];
+}): Promise<MoveTaskResult> {
+  if (!(await requireSchedulerOrAdmin())) {
+    return { ok: false, error: 'Forbidden' };
+  }
+
+  const task = await prisma.task.findUnique({
+    where: { id: args.taskId },
+    select: {
+      id: true,
+      assignedInstallerId: true,
+      scheduledDate: true,
+      projectId: true,
+    },
+  });
+  if (!task) return { ok: false, error: 'Task not found.' };
+
+  if (args.target.kind === 'pool') {
+    await prisma.task.update({
+      where: { id: task.id },
+      data: {
+        scheduledDate: null,
+        scheduledOrder: null,
+        assignedInstallerId: null,
+      },
+    });
+    revalidatePath('/board');
+    revalidatePath(`/projects/${task.projectId}`);
+    return { ok: true };
+  }
+
+  const { installerId, dateISO } = args.target;
+  const date = parseBoardDate(dateISO);
+  if (!date) return { ok: false, error: 'Invalid date.' };
+
+  const installer = await prisma.user.findUnique({
+    where: { id: installerId },
+    select: { id: true, role: true, active: true },
+  });
+  if (!installer || !installer.active || installer.role !== 'installer') {
+    return { ok: false, error: 'Installer not available.' };
+  }
+
+  const ordered = args.destOrderedTaskIds && args.destOrderedTaskIds.length > 0
+    ? args.destOrderedTaskIds
+    : [task.id];
+
+  if (!ordered.includes(task.id)) ordered.push(task.id);
+
+  // Persist: every task in `ordered` is set to (date, installerId, index).
+  // Single transaction so the column ordering is consistent.
+  await prisma.$transaction(
+    ordered.map((id, index) =>
+      prisma.task.update({
+        where: { id },
+        data: {
+          scheduledDate: date,
+          scheduledOrder: index,
+          assignedInstallerId: installerId,
+        },
+      }),
+    ),
+  );
+
+  revalidatePath('/board');
+  revalidatePath(`/projects/${task.projectId}`);
+  return { ok: true };
+}

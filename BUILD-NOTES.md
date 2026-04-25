@@ -179,3 +179,54 @@ Append-only build log. Newest entries at the bottom. If it isn't here, it's undo
 - ⏭ Sprint 2: dnd-kit board (`/board`). Project pool → installer columns, drag to schedule, drag between dates/installers, ordering. Will reuse the actions in `tasks/actions.ts` for persistence.
 - ⏭ Sprint 3: photos + PWA + mobile polish (Notes thread already has the schema plumbing; UI not yet built).
 - 🟡 `/me` will look empty until the board ships and the scheduler assigns tasks.
+
+---
+
+## 2026-04-25 — Sprint 2: dnd-kit board at `/board`
+
+**What shipped**
+- `/board` — drag-and-drop day board for admin or scheduler. Project pool on the left (all unscheduled, non-archived, non-done tasks across all projects), one column per active installer on the right.
+- Date navigation via `?date=YYYY-MM-DD` query param. Prev / Today / Next links rebuild URLs server-side. Default = today's UTC date.
+- `/me` now hooks up: when a task lands in an installer's column on a given date, it appears under that installer's Today / Coming up sections automatically (already wired in Sprint 1, just needed real scheduled tasks to demo).
+
+**Drag operations supported**
+- Pool → installer column → schedules + assigns + sets `scheduledOrder` (in a transaction with the column's other tasks so ordering stays consistent).
+- Installer column → installer column → reassigns + reorders.
+- Within column → reorder, persisted as a fresh `scheduledOrder` index for every task in the column.
+- Installer column → pool → unschedules (clears `scheduledDate`, `scheduledOrder`, `assignedInstallerId`).
+
+**Server-side single-action-handles-all approach**
+- `moveTask({ taskId, target, destOrderedTaskIds })` in `app/tasks/actions.ts`.
+- For `target.kind === 'pool'`: clears scheduling fields. No order needed.
+- For `target.kind === 'column'`: rewrites `scheduledOrder` for every id in `destOrderedTaskIds` inside one `prisma.$transaction`. Avoids the half-applied state if the network drops mid-reorder.
+- Date is interpreted as a UTC calendar day. Stored as `2026-04-25 00:00:00+00`. Pool query uses `scheduledDate: null`; column query uses `gte: dayStart, lt: dayEnd`. Day boundaries are computed in UTC server-side.
+
+**Optimistic UI pattern**
+- `Board.tsx` keeps a `Record<ColumnKey, BoardTask[]>` in `useState`. Drop events update local state synchronously, then fire `moveTask` in `useTransition`. Failed moves surface an error banner but do NOT revert (keeps the UX from flickering — the next page navigation will reconcile from the DB if needed).
+- Cross-column moves do the placeholder swap in `onDragOver` (so the drop target shows a real preview, not just an outline). Same-column reorders are deferred to `onDragEnd` for index stability.
+
+**Sensors**
+- PointerSensor with 4-px activation distance (so the card click-to-edit area on `/projects/[id]` won't interfere if we add it back later).
+- KeyboardSensor with sortable coordinate getter — accessibility (Tab to focus card, Space to grab, arrows to move).
+
+**File map added**
+- `app/app/board/page.tsx` — server fetch + DateNav links.
+- `app/app/board/Board.tsx` — client DndContext + state.
+- `app/app/board/Column.tsx` — client droppable wrapper.
+- `app/app/board/TaskCard.tsx` — client sortable card.
+- `app/app/tasks/actions.ts` — added `moveTask`, `MoveTaskTarget`.
+- `app/package.json` — added `@dnd-kit/core`, `@dnd-kit/sortable`, `@dnd-kit/utilities`.
+
+**Verification**
+- /board GET 200 for admin ✅
+- /board GET 307 for installer (chris) ✅
+- ?date param honored, Prev/Next/Today links build correct URLs ✅
+- Pool query and per-column query consistent with DB state ✅
+- Tasks scheduled to Chris for today appear in Chris's column AND in Chris's `/me` Today section ✅
+- DnD interactive behavior must be tested by user in browser (drag, drop across columns, reorder, drop to pool).
+
+**Status at end of Sprint 2**
+- ✅ Sprint 0–2 complete. Real scheduling workflow now end-to-end: scheduler creates project + tasks → drags to installer/date → installer sees tasks on `/me`.
+- ⏭ Sprint 3: photo upload + thumbnails (sharp), PWA install prompt, mobile polish, notes thread UI on tasks (DB already has Note + NotePhoto).
+- ⏭ Sprint 4: week board view, audit log, ICS calendar feed.
+- 🟡 Known sharp edges to watch for in real use: timezone handling (board treats every date as UTC midnight — if user is in EST and creates a task at 11pm local, it might land on the wrong day in the board UI). Will revisit if it bites.

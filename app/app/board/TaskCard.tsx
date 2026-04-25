@@ -1,0 +1,68 @@
+'use client';
+
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import type { BoardTask } from './Board';
+
+type Props = {
+  task: BoardTask;
+  containerId: string;
+  overlay?: boolean;
+};
+
+export default function TaskCard({ task, containerId, overlay = false }: Props) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: task.id,
+    data: { containerId },
+  });
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    transition,
+    opacity: isDragging && !overlay ? 0.4 : 1,
+  };
+
+  return (
+    <article
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      className={`cursor-grab rounded border bg-white p-2 text-sm shadow-sm active:cursor-grabbing dark:bg-neutral-800 ${
+        overlay
+          ? 'rotate-1 border-blue-400 shadow-lg'
+          : 'border-neutral-200 dark:border-neutral-700'
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        {task.project.color && (
+          <span
+            className="h-2 w-2 shrink-0 rounded-full"
+            style={{ backgroundColor: task.project.color }}
+          />
+        )}
+        <span className="truncate text-xs text-neutral-500">
+          {task.project.name}
+          {task.project.clientName ? ` · ${task.project.clientName}` : ''}
+        </span>
+        <StatusPill status={task.status} />
+      </div>
+      <p className="mt-1 line-clamp-3 font-medium">{task.title}</p>
+    </article>
+  );
+}
+
+function StatusPill({ status }: { status: BoardTask['status'] }) {
+  const map: Record<BoardTask['status'], string> = {
+    pending: 'bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200',
+    in_progress: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200',
+    done: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200',
+    blocked: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
+  };
+  if (status === 'pending') return null;
+  return (
+    <span className={`ml-auto rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${map[status]}`}>
+      {status.replace('_', ' ')}
+    </span>
+  );
+}
