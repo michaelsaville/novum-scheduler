@@ -72,3 +72,56 @@ Append-only build log. Newest entries at the bottom. If it isn't here, it's undo
 - ✅ Sprint 0 complete. Stack live, schema in DB, TLS valid, public URL reachable.
 - ⏭ Sprint 1 ready to start: Auth.js v5 credentials provider, `/admin/users` panel, projects + tasks CRUD. Still need real names/emails for the 4 installers + scheduler before seeding accounts; will surface that to user.
 - 🚫 Not yet committed to git remotely — local-only repo, no GitHub remote configured. Following the taskhub precedent (local-only git, no GitHub).
+
+---
+
+## 2026-04-25 — Sprint 1 part 1: auth + seeded users (resumed after disconnect)
+
+**What shipped this session**
+- Auth.js v5 credentials provider with bcrypt — username + password (no email infra).
+- Edge-safe `auth.config.ts` (used by middleware) + Node-runtime `auth.ts` (Credentials provider, JWT callbacks).
+- `app/api/auth/[...nextauth]/route.ts` re-exports `GET`/`POST` from `handlers`.
+- Login page at `/login` (server-action, username/password, error rendering).
+- Root page is auth-gated: installers redirect to `/me`, admin/scheduler land on a nav stub.
+- 3 seed users created: `msaville` (admin), `chris` (installer), `jgoodrum` (installer). Dave dropped at user request — narrowed initial roster while we focus on Mark + 2 installers.
+
+**Schema change**
+- `User.email` → optional, `User.username` → required & unique (this is the login key now). Pushed via the same one-shot `prisma db push` pattern as Sprint 0. Note: schema had already been pushed before the disconnect, so this session's push was a no-op.
+
+**Middleware matcher**
+- Negative lookahead: `^(?!_next/static|_next/image|favicon.ico|api/auth|api/cron|api/webhooks|api/health).*` — explicitly excludes any future cron/webhook routes from withAuth, mirroring the prior TicketHub burn where withAuth 307'd a cron path silently for a day.
+
+**Authorization rules (in `auth.config.ts`)**
+- `/login`, `/api/auth` → public
+- `/admin/*` → admin only
+- `/board`, `/projects` → admin or scheduler
+- everything else → any logged-in user
+- unauthenticated → middleware redirects to `/login?callbackUrl=<requested>`
+
+**Gotchas hit this session**
+- **Route handler bug**: had `export { GET, POST } from '@/auth'` but `auth.ts` exports `handlers` (an object containing GET/POST), so the re-export resolved to `undefined`. Fixed to `import { handlers } from '@/auth'; export const { GET, POST } = handlers`.
+- **`UntrustedHost` from Auth.js v5 behind nginx**: needed `trustHost: true` in `authConfig`. Without it `/api/auth/session` errors and the JWT cookie never sets. Set in the edge-safe config so middleware also sees it.
+- **TS strict types**: declaring `User`/`Session` strict in `types/next-auth.d.ts` invalidated the loose `as { role?: string }` casts in `auth.ts`. Fixed by accessing `user.role` / `user.username` directly (now strongly typed).
+- **Empty `name` in session**: my callbacks didn't propagate `user.name` → `token.name` → `session.user.name`. Default population didn't kick in because we declared `Session.user` with `name: string` required. Added explicit copies in both jwt and session callbacks.
+
+**Seed**
+- `prisma/seed.ts` — `tsx`-based, idempotent (skips existing usernames). Generates 18-char base64url passwords (~108 bits entropy). Prints once, never stored.
+- Ran via one-shot `node:20-alpine` container in the compose network (the runner image has no `prisma`/`tsx`, intentionally — pruned dev deps).
+
+**Initial credentials (printed once on 2026-04-25)**
+- `msaville` → `pf3DhsUuZwvBL72zR8`
+- `chris` → `AsL6Uc12UYVPDEneyS`
+- `jgoodrum` → `RUbsHZtdFT-4me1i7_`
+- These are also relayed in the chat session for the user to capture and distribute. **Recommend rotation via `/account` first sign-in; that page is not yet built — coming with the rest of Sprint 1.**
+
+**Verification**
+- `GET /` (unauth) → 307 → `/login?callbackUrl=…` ✅
+- `GET /login` → 200 with form ✅
+- Login as `msaville` via CSRF + `/api/auth/callback/credentials` → `__Secure-authjs.session-token` cookie set ✅
+- `GET /` with cookie → 200, RSC payload contains "Welcome, Mark Saville (admin)." with admin nav links and Sign out form ✅
+- No `[auth][error]` lines in container logs after the `trustHost: true` rebuild ✅
+
+**Status at end of session**
+- ✅ Sprint 1 part 1 (auth + seeded users) deployed live.
+- ⏭ Sprint 1 part 2: `/admin/users` panel (create/edit/disable, password reset), `/account` (self-serve password change), projects CRUD, tasks CRUD.
+- ⏭ Sprint 2: dnd-kit board.
