@@ -287,3 +287,62 @@ Three tightly related pieces; shipped in three commits.
 - The full installer workflow now runs end-to-end: scheduler creates a project + tasks → drags onto installer's column for a date → installer opens the PWA on their phone, sees Today, taps a task, attaches photos and types a note — and the scheduler sees it back on the project page.
 - ⏭ Sprint 4: week board view, audit log, status workflow polish, ICS calendar feed.
 - ⏭ Later: Asana JSON importer, web push for new task assigned, timezone-aware dates, install hint banner for iOS Safari (which doesn't show install prompts), service worker for offline.
+
+---
+
+## 2026-04-25 — Sprint 4: status polish + audit log + week view + ICS feed
+
+Four phases, four commits.
+
+### Part A — status quick-actions (commit `5c43363`)
+
+- `setTaskStatus` action: assigned installer + scheduler/admin allowed. Plain form action (no useActionState — page reloads via revalidatePath are simpler than reaching for client state).
+- `/me` task cards now include all today's tasks (not just non-done) and show status pills. Done tasks render with strikethrough + 60% opacity.
+- Quick-action button row per card based on current state: pending → Start, in_progress → Mark done + Blocked, done → Reopen, blocked → Resume.
+- `/tasks/[id]` gets a 4-button status row (pending / in progress / done / blocked) — current status button is filled and disabled.
+
+### Part B — audit log (commit `223a778`)
+
+- New `AuditLog` model: `userId`, `action`, `entityType`, `entityId`, `metadata Json?`, `createdAt`. Indexes on `(entityType, entityId, createdAt)` + `(userId, createdAt)` + `createdAt` for fast filtering.
+- `lib/audit.ts` exports `logAudit()` (errors swallowed — audit failure must never break the underlying mutation) plus `describeAuditEvent()` which turns `(action, metadata)` back into human prose like "scheduled to Chris on 2026-04-27" or "changed status: pending → in_progress".
+- Wired into every mutating action: createTask, updateTask, deleteTask, moveTask (records the move target), setTaskStatus (records from/to), createNote, createProject, updateProject, archiveProject (split archive/unarchive), createUser, resetPassword, setActive (split activate/deactivate), setRole (records from/to), setColor, account password change.
+- `/tasks/[id]` shows an "Activity" section with the last 50 events for that task. `note.create` events are filtered out — notes already have their own section above.
+- `/admin/audit` (admin-only) shows the last 200 system-wide events with entity-type filter chips and click-through links to affected tasks/projects.
+
+**Schema gotcha**: prisma db push refused to add a `Json?` column without complaint, but later it refused to add a unique constraint on `icsToken` without `--accept-data-loss`. The flag is a misnomer here — we weren't adding a constraint to existing data, we were adding a brand-new nullable column and a unique constraint on it. Prisma is just conservative. Used `--accept-data-loss` to force.
+
+### Part C — week board view (commit `68b93b1`)
+
+- `/board/week?date=YYYY-MM-DD` — Mon–Sun grid, rows = installers, columns = days. Project pool above as a horizontal strip.
+- Week boundary anchored to Monday of the week containing the focus date (Sunday handled as the last day of the previous week — `day === 0 ? -6 : 1 - day`).
+- `WeekBoard.tsx` reuses the day board's `Column.tsx` + `TaskCard.tsx` and the same `moveTask` server action. ColumnKey is `cell:{installerId}|{dateISO}` so each cell knows its target at drop time.
+- Today's column gets a blue accent in the header.
+- Cross-link buttons in both `/board` and `/board/week` headers; new "Board · week view" entry in the home nav.
+
+### Part D — ICS calendar feed (this commit)
+
+- New `User.icsToken String? @unique` column. Stays NULL until the user generates one from `/account`.
+- `lib/ics.ts` builds RFC 5545 iCalendar text:
+  - Each scheduled task → one all-day VEVENT.
+  - `UID: task-{taskId}@novum.pcc2k.com` (stable so cal apps can update events on changes).
+  - `DTSTART;VALUE=DATE:YYYYMMDD` + `DTEND` exclusive next day.
+  - Text values escape `\\`, `\n`, `,`, `;` per spec.
+  - Lines folded at 75 octets with `\r\n ` continuation per RFC 5545 §3.1.
+  - `STATUS` mapped: done→COMPLETED, blocked→TENTATIVE, else→CONFIRMED.
+  - `REFRESH-INTERVAL` + `X-PUBLISHED-TTL` of 15min hint to consumers.
+- `/api/ics/[token]` (Node runtime) — public route, **NOT** behind auth. Token in the path is the credential. Looks up user by `icsToken`, returns `text/calendar; charset=utf-8` with a sensible filename. Pulls the next 6 weeks of scheduled tasks for that installer.
+- **Middleware exclusion**: added `api/ics` to the negative lookahead in `middleware.ts`. Without this the auth middleware 307s the cal app to `/login` and the subscription silently fails — same shape of bug as the prior TicketHub burn.
+- `/account` page got a "Calendar feed" section: generate / rotate / revoke buttons, current URL shown with copy-friendly code block. Treat-it-like-a-password warning included.
+
+**Verification**
+- `/api/ics/{validToken}` → 200 with valid VCALENDAR body, line folding visible, two events for chris's scheduled tasks ✅
+- `/api/ics/short` → 400 ✅
+- `/api/ics/{unknownToken}` → 404 ✅
+- Audit log records every action and renders correctly on `/tasks/[id]` and `/admin/audit` ✅
+- Week board renders 7 day columns × 2 installer rows, today's column highlighted ✅
+- Status quick-actions on `/me` cards work for chris (assigned installer) ✅
+
+**Status at end of Sprint 4**
+- ✅ Sprints 0–4 complete. Build label `0.5.0`.
+- Workflow extras now live: status quick-actions, audit log + activity timeline, week-view scheduling, ICS calendar subscription.
+- ⏭ Later (no longer "Sprint 5", just a backlog now): Asana JSON importer, web push for newly-assigned tasks, timezone-aware date handling on the board (currently UTC-only — schedulers in EST may see a one-day skew on after-7pm-local edits), iOS Safari install hint banner, service worker for offline.

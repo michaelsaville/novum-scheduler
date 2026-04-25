@@ -40,7 +40,7 @@ export default async function HomePage() {
           Sign out
         </button>
       </form>
-      <p className="text-xs text-neutral-500">Build: 0.4.0 · Sprint 3</p>
+      <p className="text-xs text-neutral-500">Build: 0.5.0 · Sprint 4</p>
     </main>
   );
 }

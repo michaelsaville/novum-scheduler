@@ -1,6 +1,8 @@
 'use server';
 
+import { randomBytes } from 'node:crypto';
 import bcrypt from 'bcryptjs';
+import { revalidatePath } from 'next/cache';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { logAudit } from '@/lib/audit';
@@ -54,4 +56,26 @@ export async function changePassword(
   });
 
   return { ok: true, error: null, message: 'Password updated.' };
+}
+
+// Calendar feed token rotation. `intent` is 'rotate' (always set a new
+// token) or 'revoke' (clear it).
+export async function rotateIcsToken(formData: FormData) {
+  const session = await auth();
+  if (!session?.user?.id) return;
+  const intent = String(formData.get('intent') ?? 'rotate');
+
+  if (intent === 'revoke') {
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: { icsToken: null },
+    });
+  } else {
+    const token = randomBytes(24).toString('base64url');
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: { icsToken: token },
+    });
+  }
+  revalidatePath('/account');
 }

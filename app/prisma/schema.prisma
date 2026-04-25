@@ -37,6 +37,7 @@ model User {
   role         Role     @default(installer)
   color        String?  // hex; used as the installer's column accent on the board
   active       Boolean  @default(true)
+  icsToken     String?  @unique // per-user public token for ICS calendar feed
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
