@@ -1,0 +1,43 @@
+'use client';
+
+import { useActionState, useEffect, useRef } from 'react';
+import { createNote, type NoteFormState } from '@/app/tasks/actions';
+
+const initial: NoteFormState = { ok: false, error: null };
+
+export default function AddNoteForm({ taskId }: { taskId: string }) {
+  const [state, formAction, pending] = useActionState(createNote, initial);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    if (state.ok) formRef.current?.reset();
+  }, [state.ok]);
+
+  return (
+    <form
+      ref={formRef}
+      action={formAction}
+      className="flex flex-col gap-2 rounded border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
+    >
+      <input type="hidden" name="taskId" value={taskId} />
+      <textarea
+        name="body"
+        required
+        rows={3}
+        maxLength={4000}
+        placeholder="Add a note…"
+        className="w-full rounded border border-neutral-300 bg-white px-3 py-2 text-base dark:border-neutral-700 dark:bg-neutral-800"
+      />
+      <div className="flex items-center gap-3">
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
+        >
+          {pending ? 'Adding…' : 'Add note'}
+        </button>
+        {state.error && <span className="text-sm text-red-700 dark:text-red-300">{state.error}</span>}
+      </div>
+    </form>
+  );
+}

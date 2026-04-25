@@ -93,6 +93,48 @@ export async function deleteTask(formData: FormData) {
   revalidatePath(`/projects/${existing.projectId}`);
 }
 
+// ── Notes ─────────────────────────────────────────────────────────────
+
+export type NoteFormState = {
+  ok: boolean;
+  error: string | null;
+};
+
+export async function createNote(
+  _prev: NoteFormState,
+  formData: FormData,
+): Promise<NoteFormState> {
+  const session = await auth();
+  if (!session?.user?.id) return { ok: false, error: 'Not signed in' };
+
+  const taskId = String(formData.get('taskId') ?? '');
+  const body = String(formData.get('body') ?? '').trim();
+
+  if (!taskId) return { ok: false, error: 'Missing task.' };
+  if (body.length < 1) return { ok: false, error: 'Note cannot be empty.' };
+  if (body.length > 4000) return { ok: false, error: 'Note too long (max 4000 chars).' };
+
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { id: true, assignedInstallerId: true, projectId: true },
+  });
+  if (!task) return { ok: false, error: 'Task not found.' };
+
+  const role = session.user.role;
+  if (role === 'installer' && task.assignedInstallerId !== session.user.id) {
+    return { ok: false, error: 'Not your task.' };
+  }
+
+  await prisma.note.create({
+    data: { taskId, userId: session.user.id, body },
+  });
+
+  revalidatePath(`/tasks/${taskId}`);
+  revalidatePath('/me');
+  revalidatePath(`/projects/${task.projectId}`);
+  return { ok: true, error: null };
+}
+
 // ── Board / drag-drop scheduling ─────────────────────────────────────────
 
 export type MoveTaskResult = { ok: boolean; error?: string };

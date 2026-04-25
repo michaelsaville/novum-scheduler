@@ -26,7 +26,10 @@ export default async function MePage() {
         scheduledDate: { gte: start, lt: end },
         status: { not: 'done' },
       },
-      include: { project: { select: { name: true, color: true, clientName: true } } },
+      include: {
+        project: { select: { name: true, color: true, clientName: true } },
+        _count: { select: { notes: true } },
+      },
       orderBy: [{ scheduledOrder: 'asc' }, { createdAt: 'asc' }],
     }),
     prisma.task.findMany({
@@ -35,7 +38,10 @@ export default async function MePage() {
         scheduledDate: { gte: end },
         status: { not: 'done' },
       },
-      include: { project: { select: { name: true, color: true, clientName: true } } },
+      include: {
+        project: { select: { name: true, color: true, clientName: true } },
+        _count: { select: { notes: true } },
+      },
       orderBy: [{ scheduledDate: 'asc' }, { scheduledOrder: 'asc' }],
       take: 20,
     }),
@@ -45,7 +51,10 @@ export default async function MePage() {
         scheduledDate: null,
         status: { not: 'done' },
       },
-      include: { project: { select: { name: true, color: true, clientName: true } } },
+      include: {
+        project: { select: { name: true, color: true, clientName: true } },
+        _count: { select: { notes: true } },
+      },
       orderBy: { createdAt: 'asc' },
       take: 20,
     }),
@@ -121,6 +130,7 @@ type TaskCardProps = {
     scheduledDate: Date | null;
     status: string;
     project: { name: string; color: string | null; clientName: string | null };
+    _count: { notes: number };
   };
   showDate?: boolean;
 };
@@ -130,7 +140,10 @@ function TaskCard({ task, showDate }: TaskCardProps) {
     ? new Date(task.scheduledDate).toISOString().slice(0, 10)
     : null;
   return (
-    <article className="rounded border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900">
+    <a
+      href={`/tasks/${task.id}`}
+      className="block rounded border border-neutral-200 bg-white p-3 hover:border-neutral-400 dark:border-neutral-800 dark:bg-neutral-900 dark:hover:border-neutral-600"
+    >
       <div className="flex items-center gap-2">
         {task.project.color && <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: task.project.color }} />}
         <span className="text-xs text-neutral-500">
@@ -144,6 +157,9 @@ function TaskCard({ task, showDate }: TaskCardProps) {
           {task.description}
         </p>
       )}
-    </article>
+      {task._count.notes > 0 && (
+        <p className="mt-1 text-xs text-neutral-500">💬 {task._count.notes} note{task._count.notes === 1 ? '' : 's'}</p>
+      )}
+    </a>
   );
 }
