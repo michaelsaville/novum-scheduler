@@ -8,9 +8,10 @@ type Props = {
   task: BoardTask;
   containerId: string;
   overlay?: boolean;
+  onUnschedule?: (taskId: string) => void;
 };
 
-export default function TaskCard({ task, containerId, overlay = false }: Props) {
+export default function TaskCard({ task, containerId, overlay = false, onUnschedule }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
     data: { containerId },
@@ -45,7 +46,26 @@ export default function TaskCard({ task, containerId, overlay = false }: Props) 
           {task.project.name}
           {task.project.clientName ? ` · ${task.project.clientName}` : ''}
         </span>
-        <StatusPill status={task.status} />
+        <div className="ml-auto flex items-center gap-1">
+          <StatusPill status={task.status} />
+          {onUnschedule && containerId !== 'pool' && !overlay && (
+            <button
+              type="button"
+              aria-label="Remove from schedule"
+              title="Remove from schedule"
+              onPointerDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onUnschedule(task.id);
+              }}
+              className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950 dark:hover:text-red-300"
+            >
+              <span aria-hidden="true" className="text-base leading-none">×</span>
+            </button>
+          )}
+        </div>
       </div>
       <p className="mt-1 line-clamp-3 font-medium">{task.title}</p>
     </article>
@@ -61,7 +81,7 @@ function StatusPill({ status }: { status: BoardTask['status'] }) {
   };
   if (status === 'pending') return null;
   return (
-    <span className={`ml-auto rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${map[status]}`}>
+    <span className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${map[status]}`}>
       {status.replace('_', ' ')}
     </span>
   );

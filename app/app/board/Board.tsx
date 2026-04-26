@@ -169,6 +169,27 @@ export default function Board({ dateISO, installers, initialPool, initialSchedul
     persistMove(activeIdStr, toCol, columns[toCol].map((t) => t.id));
   }
 
+  function handleUnschedule(taskId: string) {
+    const fromCol = findColumnOf(columns, taskId);
+    if (!fromCol || fromCol === 'pool') return;
+
+    setColumns((prev) => {
+      const fromArr = prev[fromCol];
+      const task = fromArr.find((t) => t.id === taskId);
+      if (!task) return prev;
+      return {
+        ...prev,
+        [fromCol]: fromArr.filter((t) => t.id !== taskId),
+        pool: [task, ...prev.pool],
+      };
+    });
+
+    startTransition(async () => {
+      const result = await moveTask({ taskId, target: { kind: 'pool' } });
+      if (!result.ok) setErrorMsg(result.error ?? 'Move failed.');
+    });
+  }
+
   function persistMove(taskId: string, toCol: ColumnKey, destOrderedTaskIds: string[]) {
     const target: MoveTaskTarget =
       toCol === 'pool'
@@ -233,7 +254,12 @@ export default function Board({ dateISO, installers, initialPool, initialSchedul
                   strategy={verticalListSortingStrategy}
                 >
                   {tasks.map((t) => (
-                    <TaskCard key={t.id} task={t} containerId={colKey} />
+                    <TaskCard
+                      key={t.id}
+                      task={t}
+                      containerId={colKey}
+                      onUnschedule={handleUnschedule}
+                    />
                   ))}
                 </SortableContext>
               </Column>

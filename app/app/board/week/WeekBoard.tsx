@@ -175,6 +175,27 @@ export default function WeekBoard({ installers, days, initialPool, initialSchedu
     persistMove(activeIdStr, toCol, columns[toCol].map((t) => t.id));
   }
 
+  function handleUnschedule(taskId: string) {
+    const fromCol = findColumnOf(columns, taskId);
+    if (!fromCol || fromCol === 'pool') return;
+
+    setColumns((prev) => {
+      const fromArr = prev[fromCol];
+      const task = fromArr.find((t) => t.id === taskId);
+      if (!task) return prev;
+      return {
+        ...prev,
+        [fromCol]: fromArr.filter((t) => t.id !== taskId),
+        pool: [task, ...prev.pool],
+      };
+    });
+
+    startTransition(async () => {
+      const result = await moveTask({ taskId, target: { kind: 'pool' } });
+      if (!result.ok) setErrorMsg(result.error ?? 'Move failed.');
+    });
+  }
+
   function persistMove(taskId: string, toCol: ColumnKey, destOrderedTaskIds: string[]) {
     let target: MoveTaskTarget;
     if (toCol === 'pool') {
@@ -249,7 +270,13 @@ export default function WeekBoard({ installers, days, initialPool, initialSchedu
 
           {/* Installer rows */}
           {installers.map((i) => (
-            <Row key={i.id} installer={i} days={days} columns={columns} />
+            <Row
+              key={i.id}
+              installer={i}
+              days={days}
+              columns={columns}
+              onUnschedule={handleUnschedule}
+            />
           ))}
 
           {installers.length === 0 && (
@@ -271,10 +298,12 @@ function Row({
   installer,
   days,
   columns,
+  onUnschedule,
 }: {
   installer: Installer;
   days: DayHeader[];
   columns: Record<ColumnKey, WeekBoardTask[]>;
+  onUnschedule: (taskId: string) => void;
 }) {
   return (
     <>
@@ -303,7 +332,12 @@ function Row({
               strategy={verticalListSortingStrategy}
             >
               {tasks.map((t) => (
-                <TaskCard key={t.id} task={t} containerId={k} />
+                <TaskCard
+                  key={t.id}
+                  task={t}
+                  containerId={k}
+                  onUnschedule={onUnschedule}
+                />
               ))}
             </SortableContext>
           </Column>

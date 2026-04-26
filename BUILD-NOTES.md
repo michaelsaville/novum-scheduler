@@ -400,3 +400,43 @@ the schema churn until that's a real ask.
 - iOS Safari install hint banner (Safari doesn't fire
   `beforeinstallprompt`)
 - Service worker for full offline shell
+
+---
+
+## 2026-04-26 — Unschedule pill on scheduled task cards
+
+**Need**: schedulers wanted a one-click way to take a task off the
+schedule when it was assigned in error, without dragging the card
+back into the pool.
+
+**Change**:
+- `TaskCard` now accepts an optional `onUnschedule(taskId)` prop.
+  When supplied AND `containerId !== 'pool'` AND not in the
+  `DragOverlay`, a small "×" pill renders next to the status pill in
+  the card header. Click reverts the task to the project pool.
+- `Board.tsx` (day view) and `WeekBoard.tsx` (week view) implement
+  `handleUnschedule`: optimistic local-state move (column → pool top)
+  + `moveTask({ kind: 'pool' })` server action in `useTransition`.
+  Errors surface in the existing red banner.
+
+**dnd-kit gotcha**: the `<article>` task card has the sortable
+listeners spread on it, so any pointerdown bubbles to the drag
+sensor. The × button must call `e.stopPropagation()` on
+`onPointerDown` (and `onKeyDown`, for keyboard activation) to keep
+its click from being interpreted as a drag start. Same trick will
+apply to any future in-card buttons (e.g. quick-status, open).
+
+**Files**
+- `app/app/board/TaskCard.tsx` — added `onUnschedule` prop + button.
+  Removed `ml-auto` from `StatusPill` and put both pill + × inside a
+  flex wrapper with `ml-auto gap-1`.
+- `app/app/board/Board.tsx` — `handleUnschedule()` + pass to cards.
+- `app/app/board/week/WeekBoard.tsx` — same; `Row` sub-component now
+  takes the handler so it can forward to its cells.
+
+**Verification**
+- `docker compose build app` → clean (no TS errors).
+- `/board` and `/board/week` GET return expected unauth 307 (live
+  pages render for an authed scheduler — UI test left to user).
+- Server `moveTask` already supported `{ kind: 'pool' }` since
+  Sprint 2; no schema change needed.
