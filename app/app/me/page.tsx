@@ -2,23 +2,16 @@ import { redirect } from 'next/navigation';
 import { auth, signOut } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { setTaskStatus } from '@/app/tasks/actions';
+import { dayBoundsUTC, todayISO } from '@/lib/dates';
 
 export const dynamic = 'force-dynamic';
-
-function todayBounds() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const end = new Date(start);
-  end.setDate(end.getDate() + 1);
-  return { start, end };
-}
 
 export default async function MePage() {
   const session = await auth();
   if (!session?.user) redirect('/login');
 
   const userId = session.user.id;
-  const { start, end } = todayBounds();
+  const { start, end } = dayBoundsUTC(todayISO());
 
   const [today, upcoming, pool] = await Promise.all([
     prisma.task.findMany({

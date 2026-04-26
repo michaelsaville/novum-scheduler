@@ -1,48 +1,16 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
+import {
+  dayLabel,
+  isValidDateISO,
+  mondayOf,
+  shiftDateISO,
+  todayISO,
+} from '@/lib/dates';
 import WeekBoard from './WeekBoard';
 
 export const dynamic = 'force-dynamic';
-
-function todayISO(): string {
-  const d = new Date();
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(d.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
-function isValidDateISO(s: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(new Date(s + 'T00:00:00.000Z').getTime());
-}
-
-function shiftDateISO(iso: string, deltaDays: number): string {
-  const d = new Date(iso + 'T00:00:00.000Z');
-  d.setUTCDate(d.getUTCDate() + deltaDays);
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(d.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
-// Week starts on Monday. Returns the Monday's ISO date for the week
-// containing `iso`. (UTC; Sunday becomes -6, Mon = 0, ... Sat = -5.)
-function mondayOf(iso: string): string {
-  const d = new Date(iso + 'T00:00:00.000Z');
-  const day = d.getUTCDay(); // 0 = Sunday, 1 = Monday, ... 6 = Saturday
-  const offset = day === 0 ? -6 : 1 - day;
-  d.setUTCDate(d.getUTCDate() + offset);
-  return d.toISOString().slice(0, 10);
-}
-
-function dayLabel(iso: string): { weekday: string; dayNum: string } {
-  const d = new Date(iso + 'T00:00:00.000Z');
-  return {
-    weekday: d.toLocaleDateString('en-US', { weekday: 'short', timeZone: 'UTC' }),
-    dayNum: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }),
-  };
-}
 
 export default async function WeekBoardPage({
   searchParams,
