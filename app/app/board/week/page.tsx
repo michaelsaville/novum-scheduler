@@ -93,6 +93,7 @@ export default async function WeekBoardPage({
         </nav>
         <div className="ml-auto flex items-center gap-3 text-sm">
           <a href={`/board?date=${focus}`} className="underline">Day view</a>
+          <a href="/board/horizon" className="underline">Horizon</a>
           <a href="/projects" className="underline">Projects</a>
           <a href="/" className="underline">Home</a>
         </div>

@@ -669,3 +669,87 @@ communicates time + duration without a redesign.
   asked.
 - Existing tasks with no startMinute render at 8am with a default
   60-min height — visually correct enough, no migration needed.
+
+---
+
+## 2026-04-26 — Schedule horizon page
+
+**Need**: scheduler wanted a "how far out are we booked?" view —
+either a report or an alternative calendar — without scrubbing the
+day/week boards. Useful for quoting jobs ("we can start your
+install on May 14") and for spotting gaps to fill.
+
+**Page**: `/board/horizon?weeks=4|6|12`. Single server component,
+no client interactivity beyond cell links. Default = 6 weeks.
+
+**Two stacked sections**:
+
+1. **Per-installer summary cards** — name + color dot, plus four
+   stat fields:
+   - **Next free day** — first non-weekend day in the horizon
+     (today + future) where total scheduled minutes are below the
+     9-hour day capacity. Links to that day on `/board?date=…`.
+     Falls back to "All booked through N wk" if every weekday is
+     full.
+   - **Last scheduled** — latest day with any non-done task.
+     Tells you how far out the schedule actually extends.
+   - **Booked** — total scheduled minutes + task count over the
+     horizon, formatted via `formatDuration()`.
+   - **Days w/ work** — `N of weeks*7`, with an
+     `(M over capacity)` callout in red if any day is overbooked.
+
+2. **Capacity heatmap** — rows of installers under per-week
+   header bands. Each cell is one (installer, day):
+   - Cell content: total scheduled hours (e.g. `4h`, `8h`,
+     `8h30m`) plus an `×N` task count chip when N > 1.
+   - Cell color (Tailwind buckets, pinned literal class names so
+     JIT keeps them):
+     - 0 min, future weekday: white
+     - 0 min, weekend: light gray
+     - 0 min, past: dimmed neutral
+     - <30%: emerald-50
+     - 30–60%: emerald-100
+     - 60–95%: emerald-200
+     - 95–100%: amber-200 ("Full")
+     - >100%: red-200 ("Over")
+   - Click a cell → `/board?date=…` (jumps to that day's
+     timeline). Native `title` tooltip shows installer + date +
+     hours + task count.
+
+**Capacity model** is intentionally crude:
+- Day capacity = `DAY_END_MIN − DAY_START_MIN` = 540 min (9 hr).
+- Tasks without `estimatedMinutes` count as `DEFAULT_DURATION_MIN`
+  (60). Future tweak if duration becomes mandatory.
+- Done tasks excluded from the load calc — finished work shouldn't
+  block future scheduling.
+- Weekend handling: only flagged in the next-free-day rollup
+  (won't suggest Saturday). The heatmap still renders weekend
+  cells in gray so a Saturday booking is visible.
+
+**Anchor / range**: heatmap always anchors at the Monday of the
+current week (so the leftmost column is consistent across visits)
+and runs `weeks*7` days. URL controls range via `?weeks=4|6|12`.
+
+**Cross-links added**: `/board`, `/board/week`, and the home page
+nav now all link to `/board/horizon`. The horizon page itself
+links back to `/board?date=today`, `/board/week?date=today`,
+`/projects`, `/`.
+
+**Verification**:
+- `docker compose build app` clean.
+- `/board/horizon` and `/board/horizon?weeks=12` both 307
+  unauthed.
+- App logs clean on restart.
+- Aggregation query is one `findMany` over the whole horizon —
+  cheap. Worst-case at current scale (~3 installers × 84 days ×
+  ~2 tasks/day) is well under 1000 rows.
+
+**Known limits / follow-ups**:
+- Per-day capacity is hard-coded to the 9-hour workday. If
+  installers ever have variable hours we'd need a
+  `User.weeklyCapacity` column or similar.
+- No filter by project / status. The whole horizon shows all
+  active scheduled work.
+- No CSV / print export — defer until someone asks.
+- Cell click goes to the day board only — no deep-link to the
+  specific installer column. Easy add if useful.
