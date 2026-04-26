@@ -13,7 +13,7 @@ import {
   type DragStartEvent,
 } from '@dnd-kit/core';
 import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { moveTask, type MoveTaskTarget } from '@/app/tasks/actions';
+import { moveTask, autoScheduleTask, type MoveTaskTarget } from '@/app/tasks/actions';
 import TaskCard from './TaskCard';
 import TimelineCard from './TimelineCard';
 import Column from './Column';
@@ -91,6 +91,7 @@ export default function Board({ dateISO, installers, initialPool, initialSchedul
   const [activeId, setActiveId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -189,6 +190,34 @@ export default function Board({ dateISO, installers, initialPool, initialSchedul
     }
   }
 
+  function handleAutoSchedule(taskId: string) {
+    // Snapshot the pool task so we can restore on error.
+    const fromCol = findColumnOf(columns, taskId);
+    if (!fromCol || fromCol !== 'pool') return;
+    const snapshot = columns.pool.find((t) => t.id === taskId);
+    if (!snapshot) return;
+
+    // Optimistic: remove from pool. On success the page revalidates and the
+    // server-rendered page tree will place the task on the correct column at
+    // the right time. On error we put it back.
+    setColumns((prev) => ({
+      ...prev,
+      pool: prev.pool.filter((t) => t.id !== taskId),
+    }));
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    startTransition(async () => {
+      const r = await autoScheduleTask({ taskId });
+      if (!r.ok) {
+        setColumns((prev) => ({ ...prev, pool: [snapshot, ...prev.pool] }));
+        setErrorMsg(r.error ?? 'Auto-schedule failed.');
+      } else {
+        setSuccessMsg(r.message);
+      }
+    });
+  }
+
   function handleUnschedule(taskId: string) {
     const fromCol = findColumnOf(columns, taskId);
     if (!fromCol || fromCol === 'pool') return;
@@ -228,6 +257,11 @@ export default function Board({ dateISO, installers, initialPool, initialSchedul
           {errorMsg}
         </div>
       )}
+      {successMsg && (
+        <div className="rounded bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+          ✓ {successMsg}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[280px_1fr]">
         {/* Pool sidebar — sortable list (no time slots). */}
@@ -243,7 +277,12 @@ export default function Board({ dateISO, installers, initialPool, initialSchedul
               strategy={verticalListSortingStrategy}
             >
               {columns.pool.map((t) => (
-                <TaskCard key={t.id} task={t} containerId="pool" />
+                <TaskCard
+                  key={t.id}
+                  task={t}
+                  containerId="pool"
+                  onAutoSchedule={handleAutoSchedule}
+                />
               ))}
               {columns.pool.length === 0 && (
                 <p className="text-xs text-neutral-500">All tasks scheduled.</p>

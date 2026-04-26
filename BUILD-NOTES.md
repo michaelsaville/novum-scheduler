@@ -861,3 +861,66 @@ past" suggestions cleanly without a date library.
   widget is the at-a-glance answer.
 - 30-day horizon hard-coded in both call sites. Make it
   parametric if customers start booking further out.
+
+---
+
+## 2026-04-26 — Pool-card auto-schedule (one-click)
+
+**Need**: scheduler asked for a "fire-and-forget" auto-schedule
+button on the pool sidebar — pick a task, click, done. No need to
+open the task screen first or pick an installer.
+
+**Action refactor** (`scheduleNextAvailable` →
+`autoScheduleTask`):
+- Extracted core into a plain async function
+  `autoScheduleTask({ taskId, installerId? })` callable from
+  client code. The previous `useActionState`-shaped
+  `scheduleNextAvailable` is now a thin wrapper.
+- New first-fit mode: when `installerId` is omitted, the action
+  queries every active installer's gap in parallel and picks the
+  earliest `(dateISO, startMin)` (with dateISO compared as ISO
+  strings — they sort lexicographically thanks to the
+  `YYYY-MM-DD` zero-pad). Audit metadata records
+  `autoPickedInstaller: true` so it's clear in `/admin/audit`
+  this was an auto-pick rather than an explicit user choice.
+
+**Pool button** (TaskCard.tsx):
+- New optional `onAutoSchedule` prop; rendered only when
+  `containerId === 'pool'` and not in `DragOverlay`. Renders as a
+  full-width "⚡ Auto-schedule" button below the title/duration.
+  Stops pointerdown / keydown propagation (same dnd-kit drag-vs-
+  click trick we use for the unschedule × button).
+
+**Board state** (Board.tsx):
+- Added `successMsg` state alongside `errorMsg`. Both render as
+  banner pills above the grid.
+- `handleAutoSchedule(taskId)` snapshots the pool task, optimistic-
+  removes it, calls `autoScheduleTask({ taskId })`. On error, restores
+  the pool snapshot and surfaces the lib's error message. On
+  success, the success banner shows the slot ("Scheduled to Chris
+  on Mon, Apr 28 at 9am") — `revalidatePath('/board')` from the
+  server action causes the timeline to refresh and the card
+  reappears at its new home.
+
+### Verification
+- `docker compose build app` clean.
+- `/board` 307 unauthed (auth gate working).
+- App logs clean on restart.
+- Algorithm spot-check: task with no estimate in pool, two
+  installers both free this afternoon → action returns the
+  installer that's first alphabetically (or first by load
+  baseline; ties broken by the `installers.findMany` order which
+  is `name asc`). Acceptable; not formally fair.
+
+### Limits / follow-ups
+- "First-fit across installers" is greedy by *time*, not by
+  *workload balance*. Whichever installer has the soonest opening
+  wins, even if they're already heavily booked overall. Fairness
+  pass would compare total load before picking — defer until it's
+  a real complaint.
+- Single click → single schedule. No "schedule the whole pool"
+  bulk action; iteration risk is low at current scale.
+- The pool card now has 3 affordances: drag, click-to-open-task
+  (via the project link in the header), and Auto-schedule. Keep
+  an eye on UX clutter as we add more (#10 + #16 leave an open
+  toast pattern as an explicit polish item).

@@ -455,18 +455,21 @@ export type ScheduleNextState = {
   message: string | null;
 };
 
-export async function scheduleNextAvailable(
-  _prev: ScheduleNextState,
-  formData: FormData,
-): Promise<ScheduleNextState> {
+/**
+ * Core auto-schedule logic, callable directly from client code (board pool
+ * button) or via the form-state wrapper below (task screen). When
+ * `installerId` is absent, runs the gap finder for every active installer
+ * in parallel and picks the earliest (dateISO, startMin).
+ */
+export async function autoScheduleTask(args: {
+  taskId: string;
+  installerId?: string;
+}): Promise<ScheduleNextState> {
   const session = await requireSchedulerOrAdmin();
   if (!session) return { ok: false, error: 'Forbidden', message: null };
 
-  const taskId = String(formData.get('taskId') ?? '');
-  const installerId = String(formData.get('installerId') ?? '');
-  if (!taskId || !installerId) {
-    return { ok: false, error: 'Missing taskId or installerId.', message: null };
-  }
+  const taskId = args.taskId.trim();
+  if (!taskId) return { ok: false, error: 'Missing taskId.', message: null };
 
   const task = await prisma.task.findUnique({
     where: { id: taskId },
@@ -481,31 +484,86 @@ export async function scheduleNextAvailable(
   });
   if (!task) return { ok: false, error: 'Task not found.', message: null };
 
-  const installer = await prisma.user.findUnique({
-    where: { id: installerId },
-    select: { id: true, name: true, role: true, active: true },
-  });
-  if (!installer || !installer.active || installer.role !== 'installer') {
-    return { ok: false, error: 'Installer not available.', message: null };
-  }
-
   const durationMin = task.estimatedMinutes ?? DEFAULT_DURATION_MIN;
-  const slot = await nextAvailableForInstaller({
-    installerId: installer.id,
-    durationMin,
-    excludeTaskId: task.id,
-  });
-  if (!slot.ok) {
-    return { ok: false, error: slot.error, message: null };
+
+  type Candidate = { installerId: string; installerName: string; dateISO: string; startMin: number };
+
+  let chosen: Candidate | null = null;
+  let firstError: string | null = null;
+
+  if (args.installerId) {
+    const installer = await prisma.user.findUnique({
+      where: { id: args.installerId },
+      select: { id: true, name: true, role: true, active: true },
+    });
+    if (!installer || !installer.active || installer.role !== 'installer') {
+      return { ok: false, error: 'Installer not available.', message: null };
+    }
+    const slot = await nextAvailableForInstaller({
+      installerId: installer.id,
+      durationMin,
+      excludeTaskId: task.id,
+    });
+    if (!slot.ok) return { ok: false, error: slot.error, message: null };
+    chosen = {
+      installerId: installer.id,
+      installerName: installer.name,
+      dateISO: slot.dateISO,
+      startMin: slot.startMin,
+    };
+  } else {
+    const installers = await prisma.user.findMany({
+      where: { role: 'installer', active: true },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    });
+    if (installers.length === 0) {
+      return { ok: false, error: 'No active installers.', message: null };
+    }
+    const slots = await Promise.all(
+      installers.map(async (i) => ({
+        installer: i,
+        slot: await nextAvailableForInstaller({
+          installerId: i.id,
+          durationMin,
+          excludeTaskId: task.id,
+        }),
+      })),
+    );
+    for (const { installer, slot } of slots) {
+      if (!slot.ok) {
+        firstError = slot.error;
+        continue;
+      }
+      if (
+        !chosen ||
+        slot.dateISO < chosen.dateISO ||
+        (slot.dateISO === chosen.dateISO && slot.startMin < chosen.startMin)
+      ) {
+        chosen = {
+          installerId: installer.id,
+          installerName: installer.name,
+          dateISO: slot.dateISO,
+          startMin: slot.startMin,
+        };
+      }
+    }
+    if (!chosen) {
+      return {
+        ok: false,
+        error: firstError ?? `No ${durationMin}-min gap on any installer in next 30 days.`,
+        message: null,
+      };
+    }
   }
 
-  const date = new Date(slot.dateISO + 'T00:00:00.000Z');
+  const date = new Date(chosen.dateISO + 'T00:00:00.000Z');
   await prisma.task.update({
     where: { id: task.id },
     data: {
-      assignedInstallerId: installer.id,
+      assignedInstallerId: chosen.installerId,
       scheduledDate: date,
-      scheduledStartMinute: slot.startMin,
+      scheduledStartMinute: chosen.startMin,
       scheduledOrder: null,
     },
   });
@@ -515,19 +573,20 @@ export async function scheduleNextAvailable(
     entityType: 'task',
     entityId: task.id,
     metadata: {
-      target: { kind: 'column', installerName: installer.name, dateISO: slot.dateISO },
+      target: { kind: 'column', installerName: chosen.installerName, dateISO: chosen.dateISO },
       autoSchedule: true,
-      startMinute: slot.startMin,
+      autoPickedInstaller: !args.installerId,
+      startMinute: chosen.startMin,
     },
   });
 
-  if (task.assignedInstallerId !== installer.id) {
+  if (task.assignedInstallerId !== chosen.installerId) {
     const projectLabel = task.project.clientName
       ? `${task.project.name} · ${task.project.clientName}`
       : task.project.name;
-    void sendPushToUser(installer.id, {
+    void sendPushToUser(chosen.installerId, {
       title: 'New task assigned',
-      body: `${projectLabel}: ${task.title} (${slot.dateISO})`,
+      body: `${projectLabel}: ${task.title} (${chosen.dateISO})`,
       url: `/tasks/${task.id}`,
       tag: `task-assigned-${task.id}`,
     });
@@ -541,6 +600,17 @@ export async function scheduleNextAvailable(
   return {
     ok: true,
     error: null,
-    message: `Scheduled to ${installer.name} on ${humanDateLabel(slot.dateISO)} at ${formatTime(slot.startMin)}.`,
+    message: `Scheduled to ${chosen.installerName} on ${humanDateLabel(chosen.dateISO)} at ${formatTime(chosen.startMin)}.`,
   };
+}
+
+// useActionState wrapper for the task-screen form.
+export async function scheduleNextAvailable(
+  _prev: ScheduleNextState,
+  formData: FormData,
+): Promise<ScheduleNextState> {
+  return autoScheduleTask({
+    taskId: String(formData.get('taskId') ?? ''),
+    installerId: String(formData.get('installerId') ?? '') || undefined,
+  });
 }

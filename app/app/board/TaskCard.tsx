@@ -10,9 +10,10 @@ type Props = {
   containerId: string;
   overlay?: boolean;
   onUnschedule?: (taskId: string) => void;
+  onAutoSchedule?: (taskId: string) => void;
 };
 
-export default function TaskCard({ task, containerId, overlay = false, onUnschedule }: Props) {
+export default function TaskCard({ task, containerId, overlay = false, onUnschedule, onAutoSchedule }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
     data: { containerId },
@@ -74,6 +75,22 @@ export default function TaskCard({ task, containerId, overlay = false, onUnsched
           {task.scheduledStartMinute !== null && <span>🕒 {formatTime(task.scheduledStartMinute)}</span>}
           {task.estimatedMinutes !== null && <span>⏱ {formatDuration(task.estimatedMinutes)}</span>}
         </div>
+      )}
+      {onAutoSchedule && containerId === 'pool' && !overlay && (
+        <button
+          type="button"
+          onPointerDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            onAutoSchedule(task.id);
+          }}
+          className="mt-2 inline-flex w-full items-center justify-center gap-1 rounded border border-emerald-300 px-2 py-1 text-[11px] text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950"
+          title="Find the first contiguous gap that fits this task"
+        >
+          ⚡ Auto-schedule
+        </button>
       )}
     </article>
   );
