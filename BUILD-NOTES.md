@@ -345,4 +345,58 @@ Four phases, four commits.
 **Status at end of Sprint 4**
 - ✅ Sprints 0–4 complete. Build label `0.5.0`.
 - Workflow extras now live: status quick-actions, audit log + activity timeline, week-view scheduling, ICS calendar subscription.
-- ⏭ Later (no longer "Sprint 5", just a backlog now): Asana JSON importer, web push for newly-assigned tasks, timezone-aware date handling on the board (currently UTC-only — schedulers in EST may see a one-day skew on after-7pm-local edits), iOS Safari install hint banner, service worker for offline.
+- ⏭ Later (no longer "Sprint 5", just a backlog now): Asana JSON importer, web push for newly-assigned tasks, ~~timezone-aware date handling~~ (✅ 2026-04-26), iOS Safari install hint banner, service worker for offline.
+
+---
+
+## 2026-04-26 — Timezone fix on "today" navigation default
+
+**Bug**: scheduledDate is stored as UTC-midnight DateTime with the
+date-only ISO (`YYYY-MM-DD`) as source of truth. The day-key model is
+sound; what was broken was the *navigation default* — `todayISO()` in
+`/board`, `/board/week`, and `/me` all derived "today" from the UTC
+calendar day. A scheduler in EST editing after ~7pm local (= midnight
+UTC) would see "today" jump to tomorrow's date, and tasks dropped on
+the implied "today" column would land on the wrong day.
+
+**Fix** (commit `afd5d6c`):
+- New `lib/dates.ts` centralizes all date helpers (`todayISO`,
+  `isValidDateISO`, `shiftDateISO`, `mondayOf`, `dayBoundsUTC`,
+  `humanDateLabel`, `dayLabel`) plus a `BUSINESS_TIMEZONE` constant
+  pinned to `America/New_York`.
+- `todayISO()` formats `new Date()` via `Intl.DateTimeFormat('en-CA',
+  { timeZone: BUSINESS_TIMEZONE, ... })`. en-CA produces `YYYY-MM-DD`
+  natively. DST-aware, no library.
+- `/board/page.tsx`, `/board/week/page.tsx`, and `/me/page.tsx` all
+  switched to import from `lib/dates.ts`. Inline copies removed.
+- `/me`'s `todayBounds()` (which computed `new Date(year, month,
+  date)` using local-time getters — fragile in a UTC container)
+  replaced with `dayBoundsUTC(todayISO())`.
+- ICS route untouched: its 42-day rolling horizon is `new Date()` +
+  42 UTC-days, which is a max-instant filter and tz-insensitive.
+  Stored UTC-midnight `scheduledDate` already serializes correctly.
+
+**Verification** (inside the running container):
+```
+Probe instant: 2026-04-27T03:00:00Z (= 11pm EDT Sunday)
+  Calendar day in UTC:        2026-04-27   ← old code returned this
+  Calendar day in America/NY: 2026-04-26   ← correct, what wall clock says
+```
+
+**Schema-level change**: none. `scheduledDate` stays a UTC-midnight
+DateTime — the day-key model is unchanged. Only the JavaScript code
+that asks "what day is it right now?" got fixed.
+
+**Open**: still single-business-tz. If Novum ever picks up a crew in
+another zone, swap `BUSINESS_TIMEZONE` for a per-user pref. Not worth
+the schema churn until that's a real ask.
+
+---
+
+## Backlog after timezone fix
+
+- Asana JSON importer (next likely unblocker for Novum onboarding)
+- Web push for newly-assigned tasks
+- iOS Safari install hint banner (Safari doesn't fire
+  `beforeinstallprompt`)
+- Service worker for full offline shell
