@@ -440,3 +440,131 @@ apply to any future in-card buttons (e.g. quick-status, open).
   pages render for an authed scheduler — UI test left to user).
 - Server `moveTask` already supported `{ kind: 'pool' }` since
   Sprint 2; no schema change needed.
+
+---
+
+## 2026-04-26 — Service worker, web push, iOS install hint
+
+Three backlog items shipped together since the SW underpins push
+and the install banner is the iOS-specific reason to install the
+PWA at all.
+
+### A. Service worker + offline shell
+
+- Hand-rolled `public/sw.js`. We don't use `next-pwa` — the surface
+  is small enough that owning the SW outright is cheaper than
+  threading config through workbox.
+- `install` precaches `/offline`, the manifest, `apple-touch-icon`,
+  and the icon set with `Promise.allSettled` (one missing entry
+  shouldn't brick the install).
+- `activate` deletes any cache key that isn't `novum-shell-v1` and
+  calls `self.clients.claim()` so the new SW takes over open tabs.
+- `fetch` strategy:
+  - `/api/*` → bypass entirely. Auth, push subscribe, photos, ICS
+    must hit network with cookies/headers untouched.
+  - Static assets (`/_next/static/*`, `/icons/*`, manifest,
+    apple-touch-icon) → cache-first, populate on miss.
+  - HTML navigations → network-first, fall back to cached
+    `/offline` if the network is down. **Never cache authenticated
+    HTML** — no way to know which session it belongs to and stale
+    role-gated pages would be a mess.
+  - Everything else passes through to the browser HTTP cache.
+- New `app/offline/page.tsx` (force-static).
+- `app/sw-register.tsx` is a `'use client'` component mounted in
+  the root layout that registers `/sw.js` at root scope with
+  `updateViaCache: 'none'` (without it browsers can hold a stale SW
+  for 24h).
+
+### B. Web push for newly-assigned tasks
+
+- VAPID keys generated once via a throwaway `node:20-alpine` +
+  `web-push` container; stashed in `~/novum-scheduler/.env` as
+  `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, plus
+  `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (mirror of the public key — read
+  by the server component on `/account` and passed to the client
+  opt-in component as a prop).
+- `app/lib/push.ts` — thin web-push wrapper. `sendPushToUser` looks
+  up every `PushSubscription` row for a userId and fans out the
+  payload. 404/410 from the push service means the subscription is
+  dead → row is deleted so the table doesn't fill with zombies. All
+  other errors are logged and swallowed; push failure must never
+  break the underlying mutation.
+- New `PushSubscription` model — `userId` + `endpoint @unique` +
+  `p256dh` + `auth` + `userAgent`. Applied via the standard
+  `npx --yes prisma@6 db push --skip-generate --accept-data-loss`
+  pattern (in the compose network).
+- `POST /api/push/subscribe` upserts by endpoint. Re-keys to the
+  current user on conflict (handles the two-people-share-a-phone
+  case — most-recent sign-in wins until next subscribe).
+- `POST /api/push/unsubscribe` deletes only when (endpoint, userId)
+  match — prevents endpoint-enumeration.
+- `moveTask` (column target) fires the push when the destination
+  `installerId` differs from the previous `assignedInstallerId`.
+  Same-assignee reorders or date shifts are intentionally silent —
+  the scheduler shuffles the week often and we don't want to spam.
+  Notification: title "New task assigned", body
+  `${project} · ${client?}: ${title} (${dateISO})`, deep link to
+  `/tasks/{id}`, dedup tag `task-assigned-{id}`.
+- `/account` got a "Push notifications" section. Client component
+  walks through Notification permission → `pushManager.subscribe`
+  with the VAPID key → `POST /api/push/subscribe`. Disable button
+  unsubscribes locally and DELETEs server-side.
+
+### C. iOS Safari install hint banner
+
+- `app/InstallBanner.tsx` mounted in the root layout. UA-sniffs
+  iOS Safari (handles iPad-on-iPadOS-13+ which reports as
+  MacIntel + touch), excludes in-app webviews
+  (`CriOS|FxiOS|EdgiOS|GSA|FBAN|FBAV|Instagram|Line`), checks
+  `display-mode: standalone` AND `navigator.standalone` to skip
+  installed users, and respects a localStorage `novum.install-hint.dismissed`
+  flag.
+- Renders as a floating max-w-md card pinned to the bottom with
+  a safe-area-inset padding fallback for the home indicator.
+
+### Middleware matcher update (critical, easy to forget)
+
+`/sw.js`, `/offline`, `/manifest.webmanifest`, `/apple-touch-icon.png`,
+and `/icons/` MUST be in the negative lookahead. Browsers fetch
+these without auth cookies during install/update, and a 307→/login
+silently breaks SW registration AND PWA install. Same shape as the
+ICS feed and TicketHub-cron burns. Current excluded paths:
+`_next/static`, `_next/image`, `favicon.ico`, `sw.js`, `offline`,
+`manifest.webmanifest`, `apple-touch-icon.png`, `icons/`,
+`api/auth`, `api/cron`, `api/webhooks`, `api/health`, `api/ics`.
+
+### Gotchas worth remembering
+
+- `Uint8Array<ArrayBufferLike>` from a hand-rolled
+  `urlBase64ToUint8Array` doesn't satisfy `BufferSource` under
+  TS 5.6 + DOM lib. Cast at the `pushManager.subscribe` call site.
+  (Alternative: build via `new Uint8Array(new ArrayBuffer(n))` to
+  pin the buffer type, but the cast is shorter and equivalent.)
+- iOS web push only works **after the user installs the PWA** to
+  Home Screen (iOS 16.4+). Hence the install banner — without it,
+  iPhone users have no path to push. The PushOptIn component falls
+  back to "install the app first" copy when `'PushManager' in window`
+  is false.
+- `addEventListener('install', e => e.waitUntil(cache.addAll(...)))`
+  is atomic — one missing precache URL fails the entire install.
+  Use `Promise.allSettled` for the precache list.
+- NEXT_PUBLIC_ env vars are inlined at build time. Since the build
+  context is `./app` and `.env` lives at the repo root, the
+  NEXT_PUBLIC_ var would be undefined in the client bundle. Worked
+  around by reading it server-side in `account/page.tsx` and passing
+  to the client component as a prop — server reads `process.env` at
+  runtime, so the runtime `.env` is sufficient.
+
+### Verification
+
+- `docker compose build app` clean.
+- `/sw.js`, `/offline`, `/manifest.webmanifest`, `/icons/icon-192.png`,
+  `/apple-touch-icon.png` all 200 unauthed.
+- `/account`, `/api/push/subscribe` 307 unauthed (auth gate working).
+- `Content-Type: application/javascript; charset=UTF-8` on `/sw.js`
+  (browsers accept that for SW registration).
+- VAPID env vars present in container at runtime.
+- App logs clean on restart.
+- End-to-end push must be tested in the user's browser (allow
+  notifications on `/account`, then have a scheduler drag a task
+  onto your column from another session).

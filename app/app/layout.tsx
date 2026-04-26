@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import SwRegister from './sw-register';
+import InstallBanner from './InstallBanner';
 
 export const metadata: Metadata = {
   title: 'Novum Scheduler',
@@ -37,7 +39,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen bg-neutral-50 text-neutral-900 antialiased dark:bg-neutral-950 dark:text-neutral-100">
+        <SwRegister />
         {children}
+        <InstallBanner />
       </body>
     </html>
   );

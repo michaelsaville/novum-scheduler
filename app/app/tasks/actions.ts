@@ -10,6 +10,7 @@ import {
   PHOTO_ALLOWED_MIME,
 } from '@/lib/uploads';
 import { logAudit } from '@/lib/audit';
+import { sendPushToUser } from '@/lib/push';
 
 export type TaskFormState = {
   ok: boolean;
@@ -314,9 +315,11 @@ export async function moveTask(args: {
     where: { id: args.taskId },
     select: {
       id: true,
+      title: true,
       assignedInstallerId: true,
       scheduledDate: true,
       projectId: true,
+      project: { select: { name: true, clientName: true } },
     },
   });
   if (!task) return { ok: false, error: 'Task not found.' };
@@ -382,6 +385,21 @@ export async function moveTask(args: {
     entityId: task.id,
     metadata: { target: { kind: 'column', installerName: installer.name, dateISO } },
   });
+
+  // Notify the installer when assignment changes. Same-assignee reorders or
+  // date shifts don't fire a push — too noisy for the scheduler's normal
+  // shuffle-the-week workflow.
+  if (task.assignedInstallerId !== installerId) {
+    const projectLabel = task.project.clientName
+      ? `${task.project.name} · ${task.project.clientName}`
+      : task.project.name;
+    void sendPushToUser(installerId, {
+      title: 'New task assigned',
+      body: `${projectLabel}: ${task.title} (${dateISO})`,
+      url: `/tasks/${task.id}`,
+      tag: `task-assigned-${task.id}`,
+    });
+  }
 
   revalidatePath('/board');
   revalidatePath(`/projects/${task.projectId}`);

@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import AccountForm from './AccountForm';
+import PushOptIn from './PushOptIn';
 import { rotateIcsToken } from './actions';
 
 export const dynamic = 'force-dynamic';
@@ -30,6 +31,11 @@ export default async function AccountPage() {
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-medium">Change password</h2>
         <AccountForm />
+      </section>
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-medium">Push notifications</h2>
+        <PushOptIn vapidPublicKey={process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? null} />
       </section>
 
       <section className="flex flex-col gap-3">
