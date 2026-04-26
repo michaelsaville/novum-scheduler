@@ -753,3 +753,111 @@ links back to `/board?date=today`, `/board/week?date=today`,
 - No CSV / print export — defer until someone asks.
 - Cell click goes to the day board only — no deep-link to the
   specific installer column. Easy add if useful.
+
+---
+
+## 2026-04-26 — Availability monitor + auto-schedule
+
+**Need**: scheduler asked for two related pieces:
+1. From the dispatch page (`/board`), at-a-glance "next slot
+   open" per installer, so quoting "we can start your install on
+   X" doesn't require scrubbing the timeline.
+2. From the task screen (`/tasks/[id]`), a button that schedules
+   the task into the first contiguous gap that fits its
+   `estimatedMinutes` for a chosen installer.
+
+**Shared core**: `app/lib/availability.ts`.
+
+- `findNextSlot(busy, opts)` — pure function. Walks workday gaps
+  day-by-day from `fromDateISO`. Skips weekends by default.
+  Honors current minute-of-day in the business tz when the search
+  starts on today (no past-time suggestions; current time snaps
+  up to the next `SLOT_MIN` boundary). 30-day horizon default.
+  Returns `{ ok, dateISO, startMin, endMin }` or
+  `{ ok: false, error }`.
+- `nextAvailableForInstaller(...)` — Prisma loader. Fetches the
+  installer's tasks across the horizon, status not done, project
+  not archived, optionally `excludeTaskId` (to keep a task being
+  rescheduled from conflicting with itself). Maps each row to a
+  `BusyInterval` using `scheduledStartMinute ?? DAY_START_MIN` +
+  `estimatedMinutes ?? DEFAULT_DURATION_MIN` — same semantics the
+  timeline view uses to render blocks. Calls `findNextSlot`.
+
+**`lib/dates.ts`** got a new `nowMinuteInBusinessTz()` helper
+(via `Intl.DateTimeFormat.formatToParts` with
+`timeZone: BUSINESS_TIMEZONE`) so the slot finder can drop "in the
+past" suggestions cleanly without a date library.
+
+**Dispatch widget** (`app/board/AvailabilityPanel.tsx`):
+- Server component, runs the gap query for each installer in
+  parallel above the `Board`. Currently fixed to "next 1-hour
+  opening" — could be made parametric later, but the simple
+  answer is most of the value.
+- Renders one row per installer: color dot + name + "Today 2pm" /
+  "Tomorrow 8am" / "Mon, May 4, 2026 9am". Cell is a link to
+  `/board?date=…` of the suggested day.
+- "All booked through 30 days" message in amber if no fit found.
+- Always searches from today regardless of the date the board is
+  currently displaying — "next available" is about the future,
+  not the date you're scrubbing through.
+
+**Task-screen auto-schedule** (`app/tasks/[id]/ScheduleNextButton.tsx`
++ `scheduleNextAvailable` action):
+- Renders only for admin/scheduler and only when the task isn't
+  done.
+- Single form: installer dropdown (default = current assignee or
+  first active) + button. The form copy reflects the task's own
+  duration: "Finds the first 2 hr gap on the chosen installer's
+  calendar."
+- `scheduleNextAvailable` reads `taskId` + `installerId`, loads
+  the task's `estimatedMinutes` (defaulting to 60), calls
+  `nextAvailableForInstaller` with `excludeTaskId = task.id`.
+  Updates the task with the found slot, audits as `task.move`
+  with `autoSchedule: true` in metadata, fires the existing
+  assignee-changed push, revalidates `/board`, `/board/horizon`,
+  `/projects/[id]`, `/tasks/[id]`.
+- Error path: surfaces the lib's own error message ("No 2-hr gap
+  in next 30 days." or "Task duration exceeds workday.").
+
+### Modeling decisions worth remembering
+
+- **Tasks without `scheduledStartMinute` count as 8am+default**.
+  This matches how the timeline renders them — the algorithm and
+  the UI share the same "fuzzy-time = 8am block" semantic, so
+  auto-scheduling won't suggest a slot that overlaps a visually-
+  rendered block.
+- **Status === 'done' excluded from busy**. Done tasks shouldn't
+  block new assignments.
+- **No multi-installer optimization** — the user picks the
+  installer, the algorithm only looks at their calendar. Could
+  later add "first-fit across any installer" but the explicit
+  pick is more controllable for now.
+- **No conflict resolution on overbooked existing days**. If two
+  tasks already overlap (legitimate scenario today since we don't
+  warn on overlap), the algorithm walks past both correctly via
+  `Math.max(cursor, iv.end)` — the gap is whatever's left after
+  the latest end among overlapping intervals.
+
+### Verification
+
+- `docker compose build app` clean.
+- `/board`, `/tasks/<unknown>` both 307 unauthed (auth gate
+  working).
+- App logs clean on restart.
+- Algorithm spot-check (mental): empty calendar today after 2pm
+  for a 60-min task → suggests today's next-hour-boundary (e.g.
+  3pm), not 8am. Calendar fully booked through Friday → suggests
+  next Monday 8am.
+- End-to-end UI test left to user.
+
+### Known limits
+
+- Hard-coded 9-hour weekday workday + skip-weekend. Variable
+  hours / per-installer schedule windows would require a
+  `User.weeklyAvailability` schema (deferred).
+- `AvailabilityPanel` only shows the next 1-hour opening, not
+  "next opening that fits task X". The auto-schedule button on
+  the task screen handles the duration-aware case; the dispatch
+  widget is the at-a-glance answer.
+- 30-day horizon hard-coded in both call sites. Make it
+  parametric if customers start booking further out.

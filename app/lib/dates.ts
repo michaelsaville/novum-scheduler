@@ -29,6 +29,23 @@ export function todayISO(): string {
   return ISO_FORMATTER.format(new Date());
 }
 
+const HOUR_MINUTE_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  timeZone: BUSINESS_TIMEZONE,
+  hour12: false,
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+/** Current minute-of-day in the business timezone (0-1439). */
+export function nowMinuteInBusinessTz(): number {
+  // formatToParts is stable across runtimes for the local-zone fields we care
+  // about. The 'hour' part is '00'..'23', 'minute' is '00'..'59'.
+  const parts = HOUR_MINUTE_FORMATTER.formatToParts(new Date());
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
+  return hour * 60 + minute;
+}
+
 export function isValidDateISO(s: string): boolean {
   return (
     /^\d{4}-\d{2}-\d{2}$/.test(s) &&

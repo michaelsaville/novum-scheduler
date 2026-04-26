@@ -5,6 +5,7 @@ import { setTaskStatus } from '@/app/tasks/actions';
 import { describeAuditEvent, type AuditAction } from '@/lib/audit';
 import { formatTime, formatDuration } from '@/lib/time';
 import AddNoteForm from './AddNoteForm';
+import ScheduleNextButton from './ScheduleNextButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,7 +71,16 @@ export default async function TaskDetailPage({
   }
 
   const canPostNote = role === 'admin' || role === 'scheduler' || isAssigned;
+  const canSchedule = role === 'admin' || role === 'scheduler';
   const scheduledLabel = formatScheduledDate(task.scheduledDate);
+
+  const installers = canSchedule
+    ? await prisma.user.findMany({
+        where: { role: 'installer', active: true },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true, color: true },
+      })
+    : [];
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-5 p-5">
@@ -137,6 +147,15 @@ export default async function TaskDetailPage({
           </a>
         </div>
       </header>
+
+      {canSchedule && task.status !== 'done' && (
+        <ScheduleNextButton
+          taskId={task.id}
+          estimatedMinutes={task.estimatedMinutes}
+          currentInstallerId={task.assignedInstallerId}
+          installers={installers}
+        />
+      )}
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-medium">

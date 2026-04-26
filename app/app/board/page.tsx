@@ -9,6 +9,7 @@ import {
   todayISO,
 } from '@/lib/dates';
 import Board from './Board';
+import AvailabilityPanel from './AvailabilityPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -92,6 +93,8 @@ export default async function BoardPage({
           <a href="/" className="underline">Home</a>
         </div>
       </header>
+
+      <AvailabilityPanel installers={installers} />
 
       <Board
         dateISO={dateISO}

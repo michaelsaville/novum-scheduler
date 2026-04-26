@@ -11,6 +11,9 @@ import {
 } from '@/lib/uploads';
 import { logAudit } from '@/lib/audit';
 import { sendPushToUser } from '@/lib/push';
+import { nextAvailableForInstaller } from '@/lib/availability';
+import { formatTime, DEFAULT_DURATION_MIN } from '@/lib/time';
+import { humanDateLabel } from '@/lib/dates';
 
 export type TaskFormState = {
   ok: boolean;
@@ -442,4 +445,102 @@ export async function moveTask(args: {
   revalidatePath(`/projects/${task.projectId}`);
   revalidatePath(`/tasks/${task.id}`);
   return { ok: true };
+}
+
+// ── Auto-schedule: find the first contiguous gap that fits ───────────
+
+export type ScheduleNextState = {
+  ok: boolean;
+  error: string | null;
+  message: string | null;
+};
+
+export async function scheduleNextAvailable(
+  _prev: ScheduleNextState,
+  formData: FormData,
+): Promise<ScheduleNextState> {
+  const session = await requireSchedulerOrAdmin();
+  if (!session) return { ok: false, error: 'Forbidden', message: null };
+
+  const taskId = String(formData.get('taskId') ?? '');
+  const installerId = String(formData.get('installerId') ?? '');
+  if (!taskId || !installerId) {
+    return { ok: false, error: 'Missing taskId or installerId.', message: null };
+  }
+
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: {
+      id: true,
+      title: true,
+      estimatedMinutes: true,
+      assignedInstallerId: true,
+      projectId: true,
+      project: { select: { name: true, clientName: true } },
+    },
+  });
+  if (!task) return { ok: false, error: 'Task not found.', message: null };
+
+  const installer = await prisma.user.findUnique({
+    where: { id: installerId },
+    select: { id: true, name: true, role: true, active: true },
+  });
+  if (!installer || !installer.active || installer.role !== 'installer') {
+    return { ok: false, error: 'Installer not available.', message: null };
+  }
+
+  const durationMin = task.estimatedMinutes ?? DEFAULT_DURATION_MIN;
+  const slot = await nextAvailableForInstaller({
+    installerId: installer.id,
+    durationMin,
+    excludeTaskId: task.id,
+  });
+  if (!slot.ok) {
+    return { ok: false, error: slot.error, message: null };
+  }
+
+  const date = new Date(slot.dateISO + 'T00:00:00.000Z');
+  await prisma.task.update({
+    where: { id: task.id },
+    data: {
+      assignedInstallerId: installer.id,
+      scheduledDate: date,
+      scheduledStartMinute: slot.startMin,
+      scheduledOrder: null,
+    },
+  });
+  await logAudit({
+    userId: session.user.id,
+    action: 'task.move',
+    entityType: 'task',
+    entityId: task.id,
+    metadata: {
+      target: { kind: 'column', installerName: installer.name, dateISO: slot.dateISO },
+      autoSchedule: true,
+      startMinute: slot.startMin,
+    },
+  });
+
+  if (task.assignedInstallerId !== installer.id) {
+    const projectLabel = task.project.clientName
+      ? `${task.project.name} · ${task.project.clientName}`
+      : task.project.name;
+    void sendPushToUser(installer.id, {
+      title: 'New task assigned',
+      body: `${projectLabel}: ${task.title} (${slot.dateISO})`,
+      url: `/tasks/${task.id}`,
+      tag: `task-assigned-${task.id}`,
+    });
+  }
+
+  revalidatePath('/board');
+  revalidatePath('/board/horizon');
+  revalidatePath(`/projects/${task.projectId}`);
+  revalidatePath(`/tasks/${task.id}`);
+
+  return {
+    ok: true,
+    error: null,
+    message: `Scheduled to ${installer.name} on ${humanDateLabel(slot.dateISO)} at ${formatTime(slot.startMin)}.`,
+  };
 }
