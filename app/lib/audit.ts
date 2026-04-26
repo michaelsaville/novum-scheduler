@@ -15,6 +15,7 @@ export type AuditAction =
   | 'project.update'
   | 'project.archive'
   | 'project.unarchive'
+  | 'project.delete'
   // Users
   | 'user.create'
   | 'user.role_change'
@@ -90,6 +91,14 @@ export function describeAuditEvent(
       return 'archived the project';
     case 'project.unarchive':
       return 'unarchived the project';
+    case 'project.delete': {
+      const name = metadata?.name as string | undefined;
+      const taskCount = metadata?.taskCount as number | undefined;
+      const tail = taskCount && taskCount > 0
+        ? ` (with ${taskCount} task${taskCount === 1 ? '' : 's'})`
+        : '';
+      return name ? `deleted the project "${name}"${tail}` : `deleted the project${tail}`;
+    }
     case 'user.create':
       return 'created the user';
     case 'user.role_change': {

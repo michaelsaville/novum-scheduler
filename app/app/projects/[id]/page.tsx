@@ -5,6 +5,7 @@ import { archiveProject } from '../actions';
 import EditProjectForm from './EditProjectForm';
 import CreateTaskForm from './CreateTaskForm';
 import TaskRow from './TaskRow';
+import DeleteProjectButton from './DeleteProjectButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,13 +63,26 @@ export default async function ProjectDetailPage({
             status: project.status,
           }}
         />
-        <form action={archiveProject} className="self-start">
-          <input type="hidden" name="id" value={project.id} />
-          <input type="hidden" name="archive" value={project.archivedAt ? 'false' : 'true'} />
-          <button type="submit" className="text-xs text-neutral-500 underline hover:text-neutral-700">
-            {project.archivedAt ? 'unarchive' : 'archive project'}
-          </button>
-        </form>
+        <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-neutral-200 pt-3 dark:border-neutral-800">
+          <form action={archiveProject}>
+            <input type="hidden" name="id" value={project.id} />
+            <input type="hidden" name="archive" value={project.archivedAt ? 'false' : 'true'} />
+            <button
+              type="submit"
+              className="rounded border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800"
+            >
+              {project.archivedAt ? 'Unarchive' : 'Archive project'}
+            </button>
+          </form>
+          <DeleteProjectButton
+            id={project.id}
+            name={project.name}
+            taskCount={project.tasks.length}
+          />
+          <p className="ml-auto text-xs text-neutral-500">
+            Archive hides the project from the active list. Delete removes it and all its tasks/notes/photos.
+          </p>
+        </div>
       </section>
 
       <section className="flex flex-col gap-2">

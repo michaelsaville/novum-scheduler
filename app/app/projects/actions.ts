@@ -111,6 +111,38 @@ export async function updateProject(
   return { ok: true, error: null };
 }
 
+export async function deleteProject(formData: FormData) {
+  const session = await requireSchedulerOrAdmin();
+  if (!session) return;
+
+  const id = String(formData.get('id') ?? '');
+  if (!id) return;
+
+  // Cascade is wired in Prisma: Task.projectId onDelete: Cascade,
+  // Note → Cascade from Task, NotePhoto → Cascade from Note. AuditLog
+  // entityId is a plain string (no FK), so audit history survives —
+  // intentional, we want the deletion itself recorded and discoverable.
+  // NotePhoto rows are deleted but the JPEG files on the /uploads volume
+  // are NOT cleaned up — known minor leak, follow up if disk grows.
+  const existing = await prisma.project.findUnique({
+    where: { id },
+    select: { id: true, name: true, _count: { select: { tasks: true } } },
+  });
+  if (!existing) return;
+
+  await prisma.project.delete({ where: { id } });
+  await logAudit({
+    userId: session.user.id,
+    action: 'project.delete',
+    entityType: 'project',
+    entityId: id,
+    metadata: { name: existing.name, taskCount: existing._count.tasks },
+  });
+
+  revalidatePath('/projects');
+  redirect('/projects');
+}
+
 export async function archiveProject(formData: FormData) {
   const session = await requireSchedulerOrAdmin();
   if (!session) {
