@@ -29,6 +29,8 @@ export type WeekBoardTask = {
   description: string | null;
   status: 'pending' | 'in_progress' | 'done' | 'blocked';
   scheduledOrder: number | null;
+  scheduledStartMinute: number | null;
+  estimatedMinutes: number | null;
   assignedInstallerId: string | null;
   scheduledDateISO: string | null;
   project: { id: string; name: string; color: string | null; clientName: string | null };

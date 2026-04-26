@@ -3,6 +3,7 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { BoardTask } from './Board';
+import { formatTime, formatDuration } from '@/lib/time';
 
 type Props = {
   task: BoardTask;
@@ -68,6 +69,12 @@ export default function TaskCard({ task, containerId, overlay = false, onUnsched
         </div>
       </div>
       <p className="mt-1 line-clamp-3 font-medium">{task.title}</p>
+      {(task.scheduledStartMinute !== null || task.estimatedMinutes !== null) && (
+        <div className="mt-1 flex items-center gap-2 text-[10px] text-neutral-500 dark:text-neutral-400">
+          {task.scheduledStartMinute !== null && <span>🕒 {formatTime(task.scheduledStartMinute)}</span>}
+          {task.estimatedMinutes !== null && <span>⏱ {formatDuration(task.estimatedMinutes)}</span>}
+        </div>
+      )}
     </article>
   );
 }

@@ -10,18 +10,23 @@ import {
   useSensors,
   closestCorners,
   type DragEndEvent,
-  type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core';
-import {
-  SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable';
+import { SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { moveTask, type MoveTaskTarget } from '@/app/tasks/actions';
 import TaskCard from './TaskCard';
+import TimelineCard from './TimelineCard';
 import Column from './Column';
+import HourSlot from './HourSlot';
+import {
+  DAY_START_MIN,
+  DAY_END_MIN,
+  HOUR_SLOTS,
+  DEFAULT_DURATION_MIN,
+} from '@/lib/time';
+
+const PX_PER_HOUR = 60;
+const COLUMN_HEIGHT = ((DAY_END_MIN - DAY_START_MIN) / 60) * PX_PER_HOUR;
 
 export type BoardTask = {
   id: string;
@@ -29,6 +34,8 @@ export type BoardTask = {
   description: string | null;
   status: 'pending' | 'in_progress' | 'done' | 'blocked';
   scheduledOrder: number | null;
+  scheduledStartMinute: number | null;
+  estimatedMinutes: number | null;
   assignedInstallerId: string | null;
   project: { id: string; name: string; color: string | null; clientName: string | null };
 };
@@ -49,27 +56,32 @@ function buildInitialColumns(
   pool: BoardTask[],
   scheduled: BoardTask[],
 ): Record<ColumnKey, BoardTask[]> {
-  const columns: Record<ColumnKey, BoardTask[]> = { pool: [...pool] };
-  for (const i of installers) {
-    columns[`installer:${i.id}` as ColumnKey] = [];
-  }
+  const cols: Record<ColumnKey, BoardTask[]> = { pool: [...pool] };
+  for (const i of installers) cols[`installer:${i.id}` as ColumnKey] = [];
   for (const t of scheduled) {
     if (!t.assignedInstallerId) continue;
-    const key = `installer:${t.assignedInstallerId}` as ColumnKey;
-    if (!columns[key]) columns[key] = [];
-    columns[key].push(t);
+    const k = `installer:${t.assignedInstallerId}` as ColumnKey;
+    if (!cols[k]) cols[k] = [];
+    cols[k].push(t);
   }
-  return columns;
+  return cols;
 }
 
-function findColumnOf(
-  columns: Record<ColumnKey, BoardTask[]>,
-  taskId: string,
-): ColumnKey | null {
-  for (const key of Object.keys(columns) as ColumnKey[]) {
-    if (columns[key].some((t) => t.id === taskId)) return key;
+function findColumnOf(cols: Record<ColumnKey, BoardTask[]>, taskId: string): ColumnKey | null {
+  for (const key of Object.keys(cols) as ColumnKey[]) {
+    if (cols[key].some((t) => t.id === taskId)) return key;
   }
   return null;
+}
+
+function topPx(startMinute: number | null): number {
+  const m = startMinute ?? DAY_START_MIN;
+  return ((m - DAY_START_MIN) / 60) * PX_PER_HOUR;
+}
+
+function heightPx(durationMin: number | null): number {
+  const m = durationMin ?? DEFAULT_DURATION_MIN;
+  return Math.max(28, (m / 60) * PX_PER_HOUR);
 }
 
 export default function Board({ dateISO, installers, initialPool, initialScheduled }: Props) {
@@ -99,74 +111,82 @@ export default function Board({ dateISO, installers, initialPool, initialSchedul
     setErrorMsg(null);
   }
 
-  // Cross-column hover preview: move the dragged task into the over-column
-  // immediately so the user sees a real placeholder. Same-column reorder
-  // is handled at drop time via arrayMove for stable indices.
-  function handleDragOver(e: DragOverEvent) {
-    const { active, over } = e;
-    if (!over) return;
-    const activeIdStr = String(active.id);
-    const overIdStr = String(over.id);
-
-    const fromCol = findColumnOf(columns, activeIdStr);
-    const toCol = (over.data.current?.containerId as ColumnKey | undefined) ??
-      (overIdStr.startsWith('col:') ? (overIdStr.slice(4) as ColumnKey) : findColumnOf(columns, overIdStr));
-
-    if (!fromCol || !toCol || fromCol === toCol) return;
-
-    setColumns((prev) => {
-      const fromArr = prev[fromCol];
-      const toArr = prev[toCol] ?? [];
-      const taskIndex = fromArr.findIndex((t) => t.id === activeIdStr);
-      if (taskIndex === -1) return prev;
-      const [moved] = [fromArr[taskIndex]];
-
-      const newFrom = fromArr.filter((t) => t.id !== activeIdStr);
-      const overIndex = toArr.findIndex((t) => t.id === overIdStr);
-      const insertIndex = overIndex >= 0 ? overIndex : toArr.length;
-      const newTo = [...toArr.slice(0, insertIndex), moved, ...toArr.slice(insertIndex)];
-
-      return { ...prev, [fromCol]: newFrom, [toCol]: newTo };
-    });
-  }
-
   function handleDragEnd(e: DragEndEvent) {
-    const activeIdStr = String(e.active.id);
+    const taskId = String(e.active.id);
     setActiveId(null);
 
     const { over } = e;
     if (!over) return;
-    const overIdStr = String(over.id);
 
-    const fromCol = findColumnOf(columns, activeIdStr);
+    const fromCol = findColumnOf(columns, taskId);
     if (!fromCol) return;
 
-    // Same-column reorder.
-    if (overIdStr !== `col:${fromCol}`) {
-      const overInSameCol = columns[fromCol].some((t) => t.id === overIdStr);
-      if (overInSameCol && overIdStr !== activeIdStr) {
-        setColumns((prev) => {
-          const arr = prev[fromCol];
-          const oldIndex = arr.findIndex((t) => t.id === activeIdStr);
-          const newIndex = arr.findIndex((t) => t.id === overIdStr);
-          if (oldIndex < 0 || newIndex < 0) return prev;
-          const moved = arrayMove(arr, oldIndex, newIndex);
-          // Persist the reordering (pool is unordered server-side; only
-          // installer columns need a server roundtrip).
-          if (fromCol.startsWith('installer:')) {
-            persistMove(activeIdStr, fromCol, moved.map((t) => t.id));
-          }
-          return { ...prev, [fromCol]: moved };
-        });
-        return;
-      }
+    const overData = over.data.current as
+      | { kind?: string; installerId?: string; minute?: number; containerId?: string }
+      | undefined;
+
+    // Drop onto an hour slot in an installer column.
+    if (overData?.kind === 'hour-slot' && overData.installerId && typeof overData.minute === 'number') {
+      const toCol = `installer:${overData.installerId}` as ColumnKey;
+      const startMinute = overData.minute;
+
+      // Optimistic local state: remove from old column, place in new with new start time.
+      setColumns((prev) => {
+        const fromArr = prev[fromCol];
+        const t = fromArr.find((x) => x.id === taskId);
+        if (!t) return prev;
+        const moved: BoardTask = {
+          ...t,
+          assignedInstallerId: overData.installerId!,
+          scheduledStartMinute: startMinute,
+        };
+        const newFrom = fromArr.filter((x) => x.id !== taskId);
+        const newTo = [...(prev[toCol] ?? []).filter((x) => x.id !== taskId), moved];
+        return { ...prev, [fromCol]: newFrom, [toCol]: newTo };
+      });
+
+      const target: MoveTaskTarget = {
+        kind: 'column',
+        installerId: overData.installerId,
+        dateISO,
+        startMinute,
+      };
+      startTransition(async () => {
+        const r = await moveTask({ taskId, target });
+        if (!r.ok) setErrorMsg(r.error ?? 'Move failed.');
+      });
+      return;
     }
 
-    // Cross-column move already happened in handleDragOver.
-    // Now persist the destination column's final ordering.
-    const toCol = findColumnOf(columns, activeIdStr);
-    if (!toCol) return;
-    persistMove(activeIdStr, toCol, columns[toCol].map((t) => t.id));
+    // Drop onto the pool sortable list (or a card inside it).
+    const overContainerId = overData?.containerId ?? String(over.id);
+    const isPoolDrop =
+      overContainerId === 'pool' ||
+      String(over.id) === 'col:pool' ||
+      columns.pool.some((t) => t.id === String(over.id));
+
+    if (isPoolDrop && fromCol !== 'pool') {
+      setColumns((prev) => {
+        const fromArr = prev[fromCol];
+        const t = fromArr.find((x) => x.id === taskId);
+        if (!t) return prev;
+        const moved: BoardTask = {
+          ...t,
+          assignedInstallerId: null,
+          scheduledStartMinute: null,
+          scheduledOrder: null,
+        };
+        return {
+          ...prev,
+          [fromCol]: fromArr.filter((x) => x.id !== taskId),
+          pool: [moved, ...prev.pool],
+        };
+      });
+      startTransition(async () => {
+        const r = await moveTask({ taskId, target: { kind: 'pool' } });
+        if (!r.ok) setErrorMsg(r.error ?? 'Move failed.');
+      });
+    }
   }
 
   function handleUnschedule(taskId: string) {
@@ -175,32 +195,24 @@ export default function Board({ dateISO, installers, initialPool, initialSchedul
 
     setColumns((prev) => {
       const fromArr = prev[fromCol];
-      const task = fromArr.find((t) => t.id === taskId);
-      if (!task) return prev;
+      const t = fromArr.find((x) => x.id === taskId);
+      if (!t) return prev;
+      const moved: BoardTask = {
+        ...t,
+        assignedInstallerId: null,
+        scheduledStartMinute: null,
+        scheduledOrder: null,
+      };
       return {
         ...prev,
-        [fromCol]: fromArr.filter((t) => t.id !== taskId),
-        pool: [task, ...prev.pool],
+        [fromCol]: fromArr.filter((x) => x.id !== taskId),
+        pool: [moved, ...prev.pool],
       };
     });
 
     startTransition(async () => {
-      const result = await moveTask({ taskId, target: { kind: 'pool' } });
-      if (!result.ok) setErrorMsg(result.error ?? 'Move failed.');
-    });
-  }
-
-  function persistMove(taskId: string, toCol: ColumnKey, destOrderedTaskIds: string[]) {
-    const target: MoveTaskTarget =
-      toCol === 'pool'
-        ? { kind: 'pool' }
-        : { kind: 'column', installerId: toCol.slice('installer:'.length), dateISO };
-
-    startTransition(async () => {
-      const result = await moveTask({ taskId, target, destOrderedTaskIds });
-      if (!result.ok) {
-        setErrorMsg(result.error ?? 'Move failed.');
-      }
+      const r = await moveTask({ taskId, target: { kind: 'pool' } });
+      if (!r.ok) setErrorMsg(r.error ?? 'Move failed.');
     });
   }
 
@@ -209,7 +221,6 @@ export default function Board({ dateISO, installers, initialPool, initialSchedul
       sensors={sensors}
       collisionDetection={closestCorners}
       onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
       {errorMsg && (
@@ -219,6 +230,7 @@ export default function Board({ dateISO, installers, initialPool, initialSchedul
       )}
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[280px_1fr]">
+        {/* Pool sidebar — sortable list (no time slots). */}
         <div className="lg:max-h-[calc(100vh-9rem)] lg:overflow-y-auto">
           <Column
             id="pool"
@@ -233,36 +245,59 @@ export default function Board({ dateISO, installers, initialPool, initialSchedul
               {columns.pool.map((t) => (
                 <TaskCard key={t.id} task={t} containerId="pool" />
               ))}
+              {columns.pool.length === 0 && (
+                <p className="text-xs text-neutral-500">All tasks scheduled.</p>
+              )}
             </SortableContext>
           </Column>
         </div>
 
-        <div className="grid auto-cols-[minmax(260px,1fr)] grid-flow-col gap-3 overflow-x-auto pb-2 lg:max-h-[calc(100vh-9rem)] lg:overflow-y-hidden">
+        {/* Installer timeline columns. */}
+        <div className="grid auto-cols-[minmax(240px,1fr)] grid-flow-col gap-3 overflow-x-auto pb-2">
           {installers.map((i) => {
             const colKey = `installer:${i.id}` as ColumnKey;
             const tasks = columns[colKey] ?? [];
             return (
-              <Column
+              <section
                 key={i.id}
-                id={colKey}
-                title={i.name}
-                subtitle={`${tasks.length} task${tasks.length === 1 ? '' : 's'}`}
-                accent={i.color}
+                className="flex flex-col rounded border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900"
               >
-                <SortableContext
-                  items={tasks.map((t) => t.id)}
-                  strategy={verticalListSortingStrategy}
+                <header className="flex items-center gap-2 border-b border-neutral-200 px-2 py-2 dark:border-neutral-800">
+                  {i.color && (
+                    <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: i.color }} />
+                  )}
+                  <h2 className="text-sm font-semibold">{i.name}</h2>
+                  <span className="ml-auto text-xs text-neutral-500">
+                    {tasks.length} task{tasks.length === 1 ? '' : 's'}
+                  </span>
+                </header>
+                <div
+                  className="relative"
+                  style={{ height: COLUMN_HEIGHT }}
                 >
+                  {/* Hour drop zones (background) */}
+                  {HOUR_SLOTS.map((m) => (
+                    <HourSlot
+                      key={m}
+                      installerId={i.id}
+                      minute={m}
+                      height={PX_PER_HOUR}
+                      showLabel
+                    />
+                  ))}
+                  {/* Task blocks (foreground, absolutely positioned) */}
                   {tasks.map((t) => (
-                    <TaskCard
+                    <TimelineCard
                       key={t.id}
                       task={t}
                       containerId={colKey}
+                      top={topPx(t.scheduledStartMinute)}
+                      height={heightPx(t.estimatedMinutes)}
                       onUnschedule={handleUnschedule}
                     />
                   ))}
-                </SortableContext>
-              </Column>
+                </div>
+              </section>
             );
           })}
           {installers.length === 0 && (

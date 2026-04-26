@@ -95,18 +95,20 @@ model Project {
 }
 
 model Task {
-  id                  String     @id @default(cuid())
-  projectId           String
-  title               String
-  description         String?
-  scheduledDate       DateTime?  // null while in the project pool
-  scheduledOrder      Int?       // ordering within an installer's column for that date
-  assignedInstallerId String?
-  status              TaskStatus @default(pending)
-  externalId          String?
-  externalSource      String?
-  createdAt           DateTime   @default(now())
-  updatedAt           DateTime   @updatedAt
+  id                   String     @id @default(cuid())
+  projectId            String
+  title                String
+  description          String?
+  scheduledDate        DateTime?  // null while in the project pool
+  scheduledOrder       Int?       // ordering within an installer's column for that date (legacy; less meaningful with time slots)
+  scheduledStartMinute Int?       // minutes from local midnight (480 = 8am, 540 = 9am, …). null = on-day but not pinned to a time.
+  estimatedMinutes     Int?       // duration estimate. null = unspecified; UI defaults to 60min when rendering.
+  assignedInstallerId  String?
+  status               TaskStatus @default(pending)
+  externalId           String?
+  externalSource       String?
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
 
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
   installer User?   @relation("AssignedInstaller", fields: [assignedInstallerId], references: [id], onDelete: SetNull)

@@ -50,7 +50,7 @@ export default async function BoardPage({
         scheduledDate: { gte: dayStart, lt: dayEnd },
         assignedInstallerId: { not: null },
       },
-      orderBy: [{ assignedInstallerId: 'asc' }, { scheduledOrder: 'asc' }],
+      orderBy: [{ assignedInstallerId: 'asc' }, { scheduledStartMinute: 'asc' }, { scheduledOrder: 'asc' }],
       include: {
         project: { select: { id: true, name: true, color: true, clientName: true } },
       },
@@ -109,6 +109,8 @@ type DbTask = {
   status: string;
   scheduledDate: Date | null;
   scheduledOrder: number | null;
+  scheduledStartMinute: number | null;
+  estimatedMinutes: number | null;
   assignedInstallerId: string | null;
   project: { id: string; name: string; color: string | null; clientName: string | null };
 };
@@ -120,6 +122,8 @@ function serializeTask(t: DbTask) {
     description: t.description,
     status: t.status as 'pending' | 'in_progress' | 'done' | 'blocked',
     scheduledOrder: t.scheduledOrder,
+    scheduledStartMinute: t.scheduledStartMinute,
+    estimatedMinutes: t.estimatedMinutes,
     assignedInstallerId: t.assignedInstallerId,
     project: t.project,
   };

@@ -568,3 +568,104 @@ ICS feed and TicketHub-cron burns. Current excluded paths:
 - End-to-end push must be tested in the user's browser (allow
   notifications on `/account`, then have a scheduler drag a task
   onto your column from another session).
+
+---
+
+## 2026-04-26 — Time slots + estimated duration
+
+**Need**: scheduler wanted to see what each installer is doing
+throughout the workday (not just an unordered card pile per day),
+plus give each task a duration estimate so the schedule can show
+realistic time blocks.
+
+**Schema additions** (commit pending):
+- `Task.scheduledStartMinute Int?` — minutes from local midnight
+  (480 = 8am, 540 = 9am, …). null = on-day but not pinned to a
+  time. Existing tasks remain null and render at the top of their
+  column with a default 60-min height.
+- `Task.estimatedMinutes Int?` — duration in minutes. null =
+  unspecified; UI defaults to 60min when sizing the timeline block.
+  Applied via the standard one-shot prisma db push.
+
+**`lib/time.ts`** centralizes every time-of-day helper —
+`DAY_START_MIN`/`DAY_END_MIN` (8am/5pm), `SLOT_MIN` (60),
+`HOUR_SLOTS` array, `DURATION_OPTIONS` for the form, plus
+`formatTime`/`formatDuration`/`formatTimeRange`/`snapToSlot`.
+Pinned to America/New_York by virtue of being scheduler-local.
+
+**Day board redesigned as vertical timeline** (`/board`):
+- Pool sidebar unchanged (still a sortable card list).
+- Each installer column is now a 540-px tall (9 hr × 60 px) panel
+  with hour rows from 8am to 4pm as drop zones.
+- Tasks render as **absolutely-positioned `TimelineCard` blocks**:
+  `top = (startMinute - 480) / 60 × 60px`,
+  `height = (estimatedMinutes ?? 60) / 60 × 60px`,
+  min height 28 px so a 30-min task is still grabbable.
+- Cards have a 3-px left bar in the project color and a translucent
+  background tint per status (blue/in-progress, green/done,
+  red/blocked). Pure flat white was too featureless once cards had
+  to compete with hour ticks.
+- Drop semantics:
+  - Drop into an hour slot → `moveTask({ kind: 'column',
+    installerId, dateISO, startMinute })`. The action sets
+    `scheduledStartMinute` and clears `scheduledOrder` (the column
+    no longer has implicit order — start time is the order).
+  - Drop into the pool sidebar → unchanged (`{ kind: 'pool' }`,
+    everything cleared including the new start-minute pin).
+  - The "×" unschedule pill on TimelineCard does the same.
+- Removed `SortableContext` + multi-card column reorder for
+  installer columns. Reorder isn't meaningful when start-time is
+  the truth. Pool stays sortable for the existing UX.
+
+**`moveTask` server action** now accepts an optional
+`startMinute` on column targets. Validated to `[0, 24×60)` —
+out-of-range is silently coerced to null rather than rejecting
+the drop, on the principle that a fuzzy-time schedule beats a
+lost drop. When `startMinute` is provided, only the moved task
+is updated (no `destOrderedTaskIds` transaction); when it's
+absent (week view, or a future caller that doesn't pass it), the
+existing column-wide reorder transaction still runs.
+
+**Week board** (`/board/week`): kept the cell layout since a
+7-day × 9-hr × 2-installer timeline is unscannable. The card
+itself now shows `🕒 9am  ⏱ 2h` chips so each cell still
+communicates time + duration without a redesign.
+
+**Forms**:
+- `CreateTaskForm` got an "Estimated time" select (—, 30 min,
+  1/1.5/2/3/4/6/8 hr).
+- `TaskRow` (inline edit on `/projects/[id]`) got the same.
+- `createTask` + `updateTask` actions parse and validate
+  `estimatedMinutes` (1 ≤ n ≤ 1440). Update logs `duration` in
+  the changed-fields list.
+
+**Cards & detail pages now surface time/duration**:
+- `TimelineCard` (day board): time range in card footer.
+- `TaskCard` (pool + week cells): `🕒 9am  ⏱ 2h` chips when set.
+- `/me` task cards: same chips.
+- `/tasks/[id]` header: `🕒` and `⏱` next to the date pill.
+- `/projects/[id]` task list rows: same.
+
+**Verification**:
+- `docker compose build app` clean.
+- `/board`, `/board/week`, `/me` all 307 unauthed (gate working).
+- App logs clean on restart.
+- Drag a pool task onto an installer's hour slot → DB shows
+  `scheduledStartMinute` set, `scheduledOrder` null, audit log
+  records a `task.move` with `target.kind = 'column'`. (UI test
+  left to user; behavior is the same shape as the prior column
+  drop, just with the extra start-minute field.)
+
+**Known gaps / follow-ups**:
+- Visual conflict detection: if two tasks overlap in time (e.g.
+  both at 9am for the same installer), they render on top of each
+  other. No warning, no auto-stack-side-by-side. Easy to spot but
+  ugly. Add side-by-side or a red conflict outline if it bites.
+- Drag-to-resize a timeline card to change duration directly is
+  not implemented — duration only changes via the task edit form.
+- Half-hour slots: hard-coded 60-min slots for now. Snapping to
+  30-min would require either tighter slot rows or letting the
+  drop coordinate compute a non-aligned start time. Defer until
+  asked.
+- Existing tasks with no startMinute render at 8am with a default
+  60-min height — visually correct enough, no migration needed.

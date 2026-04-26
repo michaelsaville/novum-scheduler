@@ -3,6 +3,7 @@ import { auth, signOut } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { setTaskStatus } from '@/app/tasks/actions';
 import { dayBoundsUTC, todayISO } from '@/lib/dates';
+import { formatTime, formatDuration } from '@/lib/time';
 
 export const dynamic = 'force-dynamic';
 
@@ -138,6 +139,8 @@ type TaskCardProps = {
     title: string;
     description: string | null;
     scheduledDate: Date | null;
+    scheduledStartMinute: number | null;
+    estimatedMinutes: number | null;
     status: string;
     project: { name: string; color: string | null; clientName: string | null };
     _count: { notes: number };
@@ -169,6 +172,12 @@ function TaskCard({ task, showDate, showQuickActions }: TaskCardProps) {
           {showDate && dateLabel && <span className="ml-auto text-xs text-neutral-500">{dateLabel}</span>}
         </div>
         <h3 className={`mt-1 font-medium ${isDone ? 'line-through' : ''}`}>{task.title}</h3>
+        {(task.scheduledStartMinute !== null || task.estimatedMinutes !== null) && (
+          <div className="mt-1 flex items-center gap-2 text-xs text-neutral-500">
+            {task.scheduledStartMinute !== null && <span>🕒 {formatTime(task.scheduledStartMinute)}</span>}
+            {task.estimatedMinutes !== null && <span>⏱ {formatDuration(task.estimatedMinutes)}</span>}
+          </div>
+        )}
         {task.description && (
           <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-sm text-neutral-600 dark:text-neutral-400">
             {task.description}

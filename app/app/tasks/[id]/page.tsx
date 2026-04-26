@@ -3,6 +3,7 @@ import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { setTaskStatus } from '@/app/tasks/actions';
 import { describeAuditEvent, type AuditAction } from '@/lib/audit';
+import { formatTime, formatDuration } from '@/lib/time';
 import AddNoteForm from './AddNoteForm';
 
 export const dynamic = 'force-dynamic';
@@ -96,6 +97,8 @@ export default async function TaskDetailPage({
           ) : (
             <span>📥 in pool</span>
           )}
+          {task.scheduledStartMinute !== null && <span>🕒 {formatTime(task.scheduledStartMinute)}</span>}
+          {task.estimatedMinutes !== null && <span>⏱ {formatDuration(task.estimatedMinutes)}</span>}
           {task.installer ? (
             <span className="flex items-center gap-1">
               {task.installer.color && (

@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from 'react';
 import { updateTask, deleteTask, type TaskFormState } from '@/app/tasks/actions';
+import { DURATION_OPTIONS, formatDuration, formatTime } from '@/lib/time';
 
 const initial: TaskFormState = { ok: false, error: null };
 
@@ -14,6 +15,8 @@ type Props = {
     description: string | null;
     status: 'pending' | 'in_progress' | 'done' | 'blocked';
     scheduledDate: Date | null;
+    scheduledStartMinute: number | null;
+    estimatedMinutes: number | null;
     assignedInstallerId: string | null;
   };
   installers: Installer[];
@@ -43,8 +46,10 @@ export default function TaskRow({ task, installers }: Props) {
               {task.description}
             </div>
           )}
-          <div className="mt-1 flex items-center gap-2 text-xs text-neutral-500">
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
             {scheduledLabel ? <span>📅 {scheduledLabel}</span> : <span>📥 in pool</span>}
+            {task.scheduledStartMinute !== null && <span>🕒 {formatTime(task.scheduledStartMinute)}</span>}
+            {task.estimatedMinutes !== null && <span>⏱ {formatDuration(task.estimatedMinutes)}</span>}
             {installer && (
               <span className="flex items-center gap-1">
                 {installer.color && <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: installer.color }} />}
@@ -82,12 +87,30 @@ export default function TaskRow({ task, installers }: Props) {
           placeholder="Description (optional)"
           className="rounded border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
         />
-        <select name="status" defaultValue={task.status} className="self-start rounded border border-neutral-300 bg-white px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800">
-          <option value="pending">pending</option>
-          <option value="in_progress">in progress</option>
-          <option value="done">done</option>
-          <option value="blocked">blocked</option>
-        </select>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
+            <span>Status</span>
+            <select name="status" defaultValue={task.status} className="rounded border border-neutral-300 bg-white px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800">
+              <option value="pending">pending</option>
+              <option value="in_progress">in progress</option>
+              <option value="done">done</option>
+              <option value="blocked">blocked</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400">
+            <span>Estimated time</span>
+            <select
+              name="estimatedMinutes"
+              defaultValue={task.estimatedMinutes ?? ''}
+              className="rounded border border-neutral-300 bg-white px-2 py-1 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+            >
+              <option value="">—</option>
+              {DURATION_OPTIONS.map((d) => (
+                <option key={d.value} value={d.value}>{d.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="flex items-center gap-3 text-sm">
           <button type="submit" disabled={pending} className="rounded bg-neutral-900 px-3 py-1.5 font-medium text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white">
             {pending ? 'Saving…' : 'Save'}

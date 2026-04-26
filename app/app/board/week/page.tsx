@@ -115,6 +115,8 @@ type DbTask = {
   status: string;
   scheduledDate: Date | null;
   scheduledOrder: number | null;
+  scheduledStartMinute: number | null;
+  estimatedMinutes: number | null;
   assignedInstallerId: string | null;
   project: { id: string; name: string; color: string | null; clientName: string | null };
 };
@@ -126,6 +128,8 @@ function serializeTask(t: DbTask) {
     description: t.description,
     status: t.status as 'pending' | 'in_progress' | 'done' | 'blocked',
     scheduledOrder: t.scheduledOrder,
+    scheduledStartMinute: t.scheduledStartMinute,
+    estimatedMinutes: t.estimatedMinutes,
     assignedInstallerId: t.assignedInstallerId,
     scheduledDateISO: t.scheduledDate ? new Date(t.scheduledDate).toISOString().slice(0, 10) : null,
     project: t.project,

@@ -25,6 +25,13 @@ function isStatus(s: string): s is TaskStatus {
   return (STATUSES as readonly string[]).includes(s);
 }
 
+function parseEstimatedMinutes(raw: FormDataEntryValue | null): number | null {
+  if (raw === null || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0 || n > 60 * 24) return null;
+  return Math.round(n);
+}
+
 async function requireSchedulerOrAdmin() {
   const session = await auth();
   const role = session?.user?.role;
@@ -44,6 +51,7 @@ export async function createTask(
   const projectId = String(formData.get('projectId') ?? '');
   const title = String(formData.get('title') ?? '').trim();
   const description = String(formData.get('description') ?? '').trim() || null;
+  const estimatedMinutes = parseEstimatedMinutes(formData.get('estimatedMinutes'));
 
   if (!projectId) return { ok: false, error: 'Missing project.' };
   if (title.length < 1 || title.length > 200) {
@@ -54,7 +62,7 @@ export async function createTask(
   if (!project) return { ok: false, error: 'Project not found.' };
 
   const created = await prisma.task.create({
-    data: { projectId, title, description },
+    data: { projectId, title, description, estimatedMinutes },
   });
   await logAudit({
     userId: session.user.id,
@@ -81,6 +89,7 @@ export async function updateTask(
   const title = String(formData.get('title') ?? '').trim();
   const description = String(formData.get('description') ?? '').trim() || null;
   const status = String(formData.get('status') ?? '').trim();
+  const estimatedMinutes = parseEstimatedMinutes(formData.get('estimatedMinutes'));
 
   if (!id) return { ok: false, error: 'Missing task id.' };
   if (title.length < 1 || title.length > 200) {
@@ -95,10 +104,11 @@ export async function updateTask(
   if (existing.title !== title) fields.push('title');
   if (existing.description !== description) fields.push('description');
   if (existing.status !== status) fields.push('status');
+  if (existing.estimatedMinutes !== estimatedMinutes) fields.push('duration');
 
   await prisma.task.update({
     where: { id },
-    data: { title, description, status },
+    data: { title, description, status, estimatedMinutes },
   });
   if (fields.length > 0) {
     await logAudit({
@@ -286,7 +296,7 @@ export type MoveTaskResult = { ok: boolean; error?: string };
 
 export type MoveTaskTarget =
   | { kind: 'pool' }
-  | { kind: 'column'; installerId: string; dateISO: string };
+  | { kind: 'column'; installerId: string; dateISO: string; startMinute?: number };
 
 // Date is interpreted as a calendar day in UTC (yyyy-mm-dd). The board
 // stores tasks by date-only; the time portion is always 00:00 UTC so
@@ -330,6 +340,7 @@ export async function moveTask(args: {
       data: {
         scheduledDate: null,
         scheduledOrder: null,
+        scheduledStartMinute: null,
         assignedInstallerId: null,
       },
     });
@@ -346,7 +357,7 @@ export async function moveTask(args: {
     return { ok: true };
   }
 
-  const { installerId, dateISO } = args.target;
+  const { installerId, dateISO, startMinute } = args.target;
   const date = parseBoardDate(dateISO);
   if (!date) return { ok: false, error: 'Invalid date.' };
 
@@ -358,26 +369,52 @@ export async function moveTask(args: {
     return { ok: false, error: 'Installer not available.' };
   }
 
-  const ordered = args.destOrderedTaskIds && args.destOrderedTaskIds.length > 0
-    ? args.destOrderedTaskIds
-    : [task.id];
+  // Validate startMinute if provided (8am-5pm window). Out-of-range values
+  // fall back to "leave it null" rather than rejecting the move outright —
+  // we'd rather schedule the task with a fuzzy time than lose the drop.
+  const safeStartMinute =
+    typeof startMinute === 'number' &&
+    Number.isInteger(startMinute) &&
+    startMinute >= 0 &&
+    startMinute < 24 * 60
+      ? startMinute
+      : null;
 
-  if (!ordered.includes(task.id)) ordered.push(task.id);
+  // Single-task time-slot drop: just update the moved task's pin and skip
+  // the column-wide reorder transaction (timeline view doesn't pass a
+  // destOrderedTaskIds list — order is implicit from start times).
+  if (safeStartMinute !== null) {
+    await prisma.task.update({
+      where: { id: task.id },
+      data: {
+        scheduledDate: date,
+        scheduledStartMinute: safeStartMinute,
+        scheduledOrder: null,
+        assignedInstallerId: installerId,
+      },
+    });
+  } else {
+    const ordered = args.destOrderedTaskIds && args.destOrderedTaskIds.length > 0
+      ? args.destOrderedTaskIds
+      : [task.id];
 
-  // Persist: every task in `ordered` is set to (date, installerId, index).
-  // Single transaction so the column ordering is consistent.
-  await prisma.$transaction(
-    ordered.map((id, index) =>
-      prisma.task.update({
-        where: { id },
-        data: {
-          scheduledDate: date,
-          scheduledOrder: index,
-          assignedInstallerId: installerId,
-        },
-      }),
-    ),
-  );
+    if (!ordered.includes(task.id)) ordered.push(task.id);
+
+    // Persist: every task in `ordered` is set to (date, installerId, index).
+    // Single transaction so the column ordering is consistent.
+    await prisma.$transaction(
+      ordered.map((id, index) =>
+        prisma.task.update({
+          where: { id },
+          data: {
+            scheduledDate: date,
+            scheduledOrder: index,
+            assignedInstallerId: installerId,
+          },
+        }),
+      ),
+    );
+  }
   await logAudit({
     userId: session.user.id,
     action: 'task.move',
