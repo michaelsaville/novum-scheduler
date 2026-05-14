@@ -41,7 +41,11 @@ export default async function TaskDetailPage({
       project: { select: { id: true, name: true, color: true, clientName: true } },
       installer: { select: { id: true, name: true, color: true } },
       notes: {
-        orderBy: { createdAt: 'asc' },
+        // Newest first. Composer is pinned at the top of the section
+        // (UX Review §8) — operator scans the most-recent context and
+        // adds a new note without scrolling past 4+ phone screens of
+        // history every time.
+        orderBy: { createdAt: 'desc' },
         include: {
           user: { select: { id: true, name: true, username: true } },
           photos: {
@@ -189,6 +193,16 @@ export default async function TaskDetailPage({
           Notes ({task.notes.length})
         </h2>
 
+        {/* Composer pinned ABOVE the timeline (UX Review §8). Operator
+            adds a note without scrolling past prior history. */}
+        {canPostNote ? (
+          <AddNoteForm taskId={task.id} />
+        ) : (
+          <p className="text-xs text-neutral-500">
+            Only the assigned installer or a scheduler can post notes here.
+          </p>
+        )}
+
         {task.notes.length === 0 ? (
           <p className="text-sm text-neutral-500">No notes yet.</p>
         ) : (
@@ -231,14 +245,6 @@ export default async function TaskDetailPage({
               </li>
             ))}
           </ol>
-        )}
-
-        {canPostNote ? (
-          <AddNoteForm taskId={task.id} />
-        ) : (
-          <p className="text-xs text-neutral-500">
-            Only the assigned installer or a scheduler can post notes here.
-          </p>
         )}
       </section>
 

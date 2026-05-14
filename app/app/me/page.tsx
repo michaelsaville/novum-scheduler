@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { auth, signOut } from '@/auth';
+import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { setTaskStatus, startTaskTimer, stopTaskTimer } from '@/app/tasks/actions';
 import { dayBoundsUTC, todayISO } from '@/lib/dates';
@@ -103,29 +103,18 @@ export default async function MePage() {
         className="fixed inset-x-0 bottom-0 z-10 flex items-stretch border-t border-neutral-200 bg-white/95 backdrop-blur supports-[padding:max(0px)]:pb-[env(safe-area-inset-bottom)] dark:border-neutral-800 dark:bg-neutral-950/95"
         aria-label="Primary"
       >
-        <a href="/me" className="flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-sm font-medium">
+        {/* Sign-out moved into /account behind a confirm — too dangerous
+            to live one accidental thumb-tap from every screen on a
+            field-tech PWA where session-loss strands the user. UX
+            Review §4. */}
+        <a href="/me" className="flex flex-1 flex-col items-center justify-center gap-0.5 py-3 text-sm font-medium">
           <span aria-hidden>📋</span>
           <span>Today</span>
         </a>
-        <a href="/account" className="flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-sm">
+        <a href="/account" className="flex flex-1 flex-col items-center justify-center gap-0.5 py-3 text-sm">
           <span aria-hidden>👤</span>
           <span>Account</span>
         </a>
-        <form
-          action={async () => {
-            'use server';
-            await signOut({ redirectTo: '/login' });
-          }}
-          className="flex flex-1"
-        >
-          <button
-            type="submit"
-            className="flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-sm text-neutral-500"
-          >
-            <span aria-hidden>↩</span>
-            <span>Sign out</span>
-          </button>
-        </form>
       </nav>
     </>
   );

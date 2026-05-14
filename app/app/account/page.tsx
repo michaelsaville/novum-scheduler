@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { auth } from '@/auth';
+import { auth, signOut } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import AccountForm from './AccountForm';
 import PushOptIn from './PushOptIn';
@@ -86,8 +86,40 @@ export default async function AccountPage() {
         )}
       </section>
 
-      <a className="text-sm text-neutral-500 underline hover:text-neutral-700" href="/">
-        ← Back to home
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-medium">Session</h2>
+        {/* Sign-out lives here so an accidental tap on the bottom nav
+            can't strand a tech in a customer basement on a flaky
+            connection. A two-step confirm avoids the same hazard
+            on this page. UX Review §4. */}
+        <details className="rounded border border-neutral-200 dark:border-neutral-800">
+          <summary className="cursor-pointer px-3 py-2 text-sm">
+            Sign out
+          </summary>
+          <div className="border-t border-neutral-200 px-3 py-3 dark:border-neutral-800">
+            <p className="mb-3 text-sm text-neutral-600 dark:text-neutral-400">
+              You will need to sign in again to see your tasks. Make sure
+              you remember your password before continuing.
+            </p>
+            <form
+              action={async () => {
+                'use server';
+                await signOut({ redirectTo: '/login' });
+              }}
+            >
+              <button
+                type="submit"
+                className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+              >
+                Yes — sign out
+              </button>
+            </form>
+          </div>
+        </details>
+      </section>
+
+      <a className="text-sm text-neutral-500 underline hover:text-neutral-700" href="/me">
+        ← Back to today
       </a>
     </main>
   );
