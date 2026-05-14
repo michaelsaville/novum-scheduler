@@ -1,9 +1,11 @@
 import { redirect } from 'next/navigation';
 import { auth, signOut } from '@/auth';
 import { prisma } from '@/lib/prisma';
-import { setTaskStatus } from '@/app/tasks/actions';
+import { setTaskStatus, startTaskTimer, stopTaskTimer } from '@/app/tasks/actions';
 import { dayBoundsUTC, todayISO } from '@/lib/dates';
 import { formatTime, formatDuration } from '@/lib/time';
+import { getRunningTimer } from '@/lib/timer';
+import { RunningTimerBar } from '@/app/components/RunningTimerBar';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +16,7 @@ export default async function MePage() {
   const userId = session.user.id;
   const { start, end } = dayBoundsUTC(todayISO());
 
-  const [today, upcoming, pool] = await Promise.all([
+  const [today, upcoming, pool, running] = await Promise.all([
     prisma.task.findMany({
       where: {
         assignedInstallerId: userId,
@@ -52,11 +54,22 @@ export default async function MePage() {
       orderBy: { createdAt: 'asc' },
       take: 20,
     }),
+    getRunningTimer(userId),
   ]);
+  const runningTaskId = running?.taskId ?? null;
 
   return (
     <>
       <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-6 p-4 pb-24 sm:p-6 sm:pb-24">
+        {running && (
+          <RunningTimerBar
+            taskId={running.taskId}
+            taskTitle={running.task.title}
+            projectName={running.task.project.name}
+            projectColor={running.task.project.color}
+            startedAtMs={running.startedAt.getTime()}
+          />
+        )}
         <header>
           <h1 className="text-3xl font-semibold tracking-tight">Today</h1>
           <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
@@ -65,7 +78,14 @@ export default async function MePage() {
         </header>
 
         <Section title={`Today (${today.length})`} emptyText="Nothing scheduled for today.">
-          {today.map((t) => <TaskCard key={t.id} task={t} showQuickActions />)}
+          {today.map((t) => (
+            <TaskCard
+              key={t.id}
+              task={t}
+              showQuickActions
+              isTimerRunning={runningTaskId === t.id}
+            />
+          ))}
         </Section>
 
         <Section title={`Coming up (${upcoming.length})`} emptyText="No upcoming work.">
@@ -147,9 +167,11 @@ type TaskCardProps = {
   };
   showDate?: boolean;
   showQuickActions?: boolean;
+  /** True when this card's task is the user's currently-running timer. */
+  isTimerRunning?: boolean;
 };
 
-function TaskCard({ task, showDate, showQuickActions }: TaskCardProps) {
+function TaskCard({ task, showDate, showQuickActions, isTimerRunning }: TaskCardProps) {
   const dateLabel = task.scheduledDate
     ? new Date(task.scheduledDate).toISOString().slice(0, 10)
     : null;
@@ -192,11 +214,22 @@ function TaskCard({ task, showDate, showQuickActions }: TaskCardProps) {
       </a>
       {showQuickActions && (
         <div className="flex gap-2 border-t border-neutral-200 px-3 py-2 dark:border-neutral-800">
+          {/* Pending: only Start button — auto-flips status to in_progress + starts timer. */}
           {task.status === 'pending' && (
-            <StatusButton taskId={task.id} status="in_progress" label="Start →" primary />
+            <TimerButton taskId={task.id} action="start" label="▶ Start timer" primary />
           )}
-          {task.status === 'in_progress' && (
-            <StatusButton taskId={task.id} status="done" label="✓ Mark done" primary />
+          {/* In progress: split based on whether *this* task is the running timer. */}
+          {task.status === 'in_progress' && isTimerRunning && (
+            <>
+              <TimerButton taskId={task.id} action="stop" label="■ Stop timer" primary />
+              <StatusButton taskId={task.id} status="done" label="✓ Done" />
+            </>
+          )}
+          {task.status === 'in_progress' && !isTimerRunning && (
+            <>
+              <TimerButton taskId={task.id} action="start" label="▶ Resume timer" primary />
+              <StatusButton taskId={task.id} status="done" label="✓ Done" />
+            </>
           )}
           {task.status === 'done' && (
             <StatusButton taskId={task.id} status="in_progress" label="Reopen" />
@@ -205,7 +238,7 @@ function TaskCard({ task, showDate, showQuickActions }: TaskCardProps) {
             <StatusButton taskId={task.id} status="blocked" label="⏸ Blocked" />
           )}
           {task.status === 'blocked' && (
-            <StatusButton taskId={task.id} status="in_progress" label="Resume" />
+            <TimerButton taskId={task.id} action="start" label="▶ Resume timer" primary />
           )}
         </div>
       )}
@@ -233,6 +266,35 @@ function StatusButton({
         className={
           primary
             ? 'rounded bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white'
+            : 'rounded border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800'
+        }
+      >
+        {label}
+      </button>
+    </form>
+  );
+}
+
+function TimerButton({
+  taskId,
+  action,
+  label,
+  primary = false,
+}: {
+  taskId: string;
+  action: 'start' | 'stop';
+  label: string;
+  primary?: boolean;
+}) {
+  const formAction = action === 'start' ? startTaskTimer : stopTaskTimer;
+  return (
+    <form action={formAction} className="inline">
+      <input type="hidden" name="taskId" value={taskId} />
+      <button
+        type="submit"
+        className={
+          primary
+            ? 'rounded bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800'
             : 'rounded border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800'
         }
       >

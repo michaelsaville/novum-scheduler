@@ -1,9 +1,11 @@
 import { notFound, redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
-import { setTaskStatus } from '@/app/tasks/actions';
+import { setTaskStatus, startTaskTimer, stopTaskTimer } from '@/app/tasks/actions';
 import { describeAuditEvent, type AuditAction } from '@/lib/audit';
 import { formatTime, formatDuration } from '@/lib/time';
+import { rollupForTask, formatHumanDuration } from '@/lib/timer';
+import { TaskTimerStrip } from './TaskTimerStrip';
 import AddNoteForm from './AddNoteForm';
 import ScheduleNextButton from './ScheduleNextButton';
 
@@ -52,6 +54,19 @@ export default async function TaskDetailPage({
   });
 
   if (!task) notFound();
+
+  // Time tracking for the viewing user. The strip shows running state +
+  // a "logged today / total" rollup so the tech sees what they've banked.
+  const timeRollup = await rollupForTask(task.id, session.user.id);
+  // The "is *this* user running a timer on this task" needs the actual
+  // entry for the live tick; rollup only knows boolean.
+  const myRunningEntry = timeRollup.isRunningForViewer
+    ? await prisma.timeEntry.findFirst({
+        where: { taskId: task.id, userId: session.user.id, stoppedAt: null },
+        orderBy: { startedAt: 'desc' },
+        select: { startedAt: true },
+      })
+    : null;
 
   // Audit timeline for this task. Notes are already a section above so
   // we filter note.create out to avoid duplication.
@@ -120,6 +135,18 @@ export default async function TaskDetailPage({
             <span>unassigned</span>
           )}
         </div>
+        {canPostNote && (
+          <TaskTimerStrip
+            taskId={task.id}
+            isRunningForMe={Boolean(myRunningEntry)}
+            startedAtMs={myRunningEntry?.startedAt.getTime() ?? null}
+            totalLabel={
+              timeRollup.totalMinutes > 0
+                ? `Logged: ${formatHumanDuration(timeRollup.totalMinutes)} across ${timeRollup.sessionCount} session${timeRollup.sessionCount === 1 ? '' : 's'}`
+                : 'No time logged yet'
+            }
+          />
+        )}
         {canPostNote && (
           <form action={setTaskStatus} className="mt-2 flex flex-wrap items-center gap-2">
             <input type="hidden" name="taskId" value={task.id} />

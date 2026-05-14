@@ -10,6 +10,9 @@ export type AuditAction =
   | 'task.status'
   // Notes
   | 'note.create'
+  // Timer
+  | 'timer.start'
+  | 'timer.stop'
   // Projects
   | 'project.create'
   | 'project.update'
@@ -83,6 +86,12 @@ export function describeAuditEvent(
     }
     case 'note.create':
       return 'added a note';
+    case 'timer.start': {
+      const flip = metadata?.autoStatusFlip;
+      return flip ? 'started a timer (status → in progress)' : 'started a timer';
+    }
+    case 'timer.stop':
+      return 'stopped the timer';
     case 'project.create':
       return 'created the project';
     case 'project.update':

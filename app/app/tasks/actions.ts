@@ -186,6 +186,129 @@ export async function setTaskStatus(formData: FormData) {
   revalidatePath(`/projects/${task.projectId}`);
 }
 
+// ── Task timer (single-active per user) ───────────────────────────────
+
+/**
+ * Start a timer on a task.
+ *
+ * - If the user already has a running timer on this same task: no-op
+ *   (idempotent against double-tap).
+ * - If the user has a running timer on a *different* task: silently
+ *   close it before opening the new one. UI surface drops a toast
+ *   "Timer moved from X to Y" so the operator sees what happened.
+ * - If the task is `pending`, auto-flip to `in_progress` in the same
+ *   transaction. Stop does NOT auto-flip to done — that's an
+ *   affirmative gesture the tech does separately.
+ *
+ * Permission: any signed-in user can start a timer on any task they
+ * have visibility of (assigned installer, scheduler, or admin).
+ */
+export async function startTaskTimer(formData: FormData) {
+  const session = await auth();
+  if (!session?.user?.id) return;
+  const taskId = String(formData.get('taskId') ?? '');
+  if (!taskId) return;
+
+  const task = await prisma.task.findUnique({
+    where: { id: taskId },
+    select: { id: true, projectId: true, assignedInstallerId: true, status: true },
+  });
+  if (!task) return;
+  const role = session.user.role;
+  const isAssigned = task.assignedInstallerId === session.user.id;
+  if (role !== 'admin' && role !== 'scheduler' && !isAssigned) return;
+
+  await prisma.$transaction(async (tx) => {
+    // Close any other running timer for this user (single-active).
+    const others = await tx.timeEntry.findMany({
+      where: { userId: session.user.id, stoppedAt: null },
+      select: { id: true, taskId: true },
+    });
+    for (const o of others) {
+      if (o.taskId === taskId) continue; // idempotent on same-task re-start
+      await tx.timeEntry.update({
+        where: { id: o.id },
+        data: { stoppedAt: new Date() },
+      });
+    }
+    // If we already have a running entry on this task, don't create another.
+    const sameTaskRunning = others.find((o) => o.taskId === taskId);
+    if (!sameTaskRunning) {
+      await tx.timeEntry.create({
+        data: { taskId, userId: session.user.id, source: 'manual' },
+      });
+    }
+    // Auto-flip pending → in_progress so the tech doesn't need a 2nd tap.
+    if (task.status === 'pending') {
+      await tx.task.update({
+        where: { id: task.id },
+        data: { status: 'in_progress' },
+      });
+    }
+  });
+
+  await logAudit({
+    userId: session.user.id,
+    action: 'timer.start',
+    entityType: 'task',
+    entityId: taskId,
+    metadata: { autoStatusFlip: task.status === 'pending' },
+  });
+  if (task.status === 'pending') {
+    await logAudit({
+      userId: session.user.id,
+      action: 'task.status',
+      entityType: 'task',
+      entityId: taskId,
+      metadata: { from: 'pending', to: 'in_progress', via: 'timer.start' },
+    });
+  }
+
+  revalidatePath('/me');
+  revalidatePath(`/tasks/${taskId}`);
+  revalidatePath('/board');
+  revalidatePath(`/projects/${task.projectId}`);
+}
+
+/**
+ * Stop the running timer for the current user. If there's no running
+ * entry, no-op. Stop is terminal — to log more time, start a new entry.
+ *
+ * Optional `taskId` form field acts as a guard: if present, only stops
+ * the running entry IF it's on that task. Avoids races where the tech
+ * tapped Stop on an old screen but the running timer is now elsewhere.
+ */
+export async function stopTaskTimer(formData: FormData) {
+  const session = await auth();
+  if (!session?.user?.id) return;
+  const expectedTaskId = String(formData.get('taskId') ?? '') || null;
+
+  const running = await prisma.timeEntry.findFirst({
+    where: { userId: session.user.id, stoppedAt: null },
+    orderBy: { startedAt: 'desc' },
+    select: { id: true, taskId: true, task: { select: { projectId: true } } },
+  });
+  if (!running) return;
+  if (expectedTaskId && running.taskId !== expectedTaskId) return;
+
+  await prisma.timeEntry.update({
+    where: { id: running.id },
+    data: { stoppedAt: new Date() },
+  });
+  await logAudit({
+    userId: session.user.id,
+    action: 'timer.stop',
+    entityType: 'task',
+    entityId: running.taskId,
+    metadata: { entryId: running.id },
+  });
+
+  revalidatePath('/me');
+  revalidatePath(`/tasks/${running.taskId}`);
+  revalidatePath('/board');
+  revalidatePath(`/projects/${running.task.projectId}`);
+}
+
 // ── Notes ─────────────────────────────────────────────────────────────
 
 export type NoteFormState = {
