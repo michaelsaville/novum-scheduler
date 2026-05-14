@@ -1,7 +1,7 @@
 import { notFound, redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
-import { archiveProject } from '../actions';
+import { archiveProject, generateClientPortalToken, revokeClientPortalToken } from '../actions';
 import EditProjectForm from './EditProjectForm';
 import CreateTaskForm from './CreateTaskForm';
 import TaskRow from './TaskRow';
@@ -37,6 +37,54 @@ export default async function ProjectDetailPage({
   ]);
 
   if (!project) notFound();
+
+  function ClientPortalSection({
+    projectId,
+    token,
+  }: {
+    projectId: string;
+    token: string | null;
+  }) {
+    const origin = process.env.PUBLIC_ORIGIN ?? 'https://novum.pcc2k.com';
+    const url = token ? `${origin}/p/${token}` : null;
+    return (
+      <div className="mt-3 rounded border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-900">
+        <h3 className="text-sm font-medium">Share with client</h3>
+        <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
+          Public read-only progress page. Anyone with the link can view —
+          treat it like a password.
+        </p>
+        {url ? (
+          <div className="mt-2 flex flex-col gap-2">
+            <code className="break-all rounded bg-white px-2 py-1 text-xs dark:bg-neutral-800">
+              {url}
+            </code>
+            <div className="flex gap-2">
+              <form action={revokeClientPortalToken} className="inline">
+                <input type="hidden" name="id" value={projectId} />
+                <button
+                  type="submit"
+                  className="rounded border border-red-300 px-3 py-1.5 text-xs text-red-700 hover:bg-red-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-950"
+                >
+                  Revoke
+                </button>
+              </form>
+            </div>
+          </div>
+        ) : (
+          <form action={generateClientPortalToken} className="mt-2">
+            <input type="hidden" name="id" value={projectId} />
+            <button
+              type="submit"
+              className="rounded bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white"
+            >
+              Generate client portal link
+            </button>
+          </form>
+        )}
+      </div>
+    );
+  }
 
   const pool = project.tasks.filter((t) => !t.scheduledDate);
   const scheduled = project.tasks.filter((t) => t.scheduledDate);
@@ -85,6 +133,10 @@ export default async function ProjectDetailPage({
             Archive hides the project from the active list. Delete removes it and all its tasks/notes/photos.
           </p>
         </div>
+        <ClientPortalSection
+          projectId={project.id}
+          token={project.clientPortalToken}
+        />
       </section>
 
       <section className="flex flex-col gap-2">

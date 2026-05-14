@@ -13,6 +13,9 @@ export default NextAuth(authConfig).auth;
 // silently for a day.
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|sw.js|offline|manifest.webmanifest|apple-touch-icon.png|icons/|api/auth|api/cron|api/webhooks|api/health|api/ics).*)',
+    // `p/` is the client-portal token-gated public surface (N8) — same
+    // pattern as `api/ics`: the token IS the auth, cookie-based auth
+    // would block the intended audience (client browser w/ no session).
+    '/((?!_next/static|_next/image|favicon.ico|sw.js|offline|manifest.webmanifest|apple-touch-icon.png|icons/|api/auth|api/cron|api/webhooks|api/health|api/ics|p/).*)',
   ],
 };
