@@ -58,6 +58,19 @@ export default function TimelineCard({ task, containerId, top, height, onUnsched
         <span className="truncate text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
           {task.project.name}
         </span>
+        {/* "Open" affordance — drag is the only interaction otherwise.
+            stopPropagation keeps drag from starting on tap. UX Review §5. */}
+        <a
+          href={`/tasks/${task.id}`}
+          aria-label="Open task"
+          title="Open task"
+          onPointerDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          className="ml-auto inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
+        >
+          <span aria-hidden className="text-xs leading-none">↗</span>
+        </a>
         {onUnschedule && (
           <button
             type="button"
@@ -70,7 +83,7 @@ export default function TimelineCard({ task, containerId, top, height, onUnsched
               e.preventDefault();
               onUnschedule(task.id);
             }}
-            className="ml-auto inline-flex h-4 w-4 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950 dark:hover:text-red-300"
+            className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded-full text-neutral-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950 dark:hover:text-red-300"
           >
             <span aria-hidden className="text-sm leading-none">×</span>
           </button>

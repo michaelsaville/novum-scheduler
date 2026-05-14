@@ -50,6 +50,19 @@ export default function TaskCard({ task, containerId, overlay = false, onUnsched
         </span>
         <div className="ml-auto flex items-center gap-1">
           <StatusPill status={task.status} />
+          {!overlay && (
+            <a
+              href={`/tasks/${task.id}`}
+              aria-label="Open task"
+              title="Open task"
+              onPointerDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex h-5 w-5 cursor-pointer items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
+            >
+              <span aria-hidden className="text-xs leading-none">↗</span>
+            </a>
+          )}
           {onUnschedule && containerId !== 'pool' && !overlay && (
             <button
               type="button"

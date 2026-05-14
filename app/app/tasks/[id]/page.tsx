@@ -5,24 +5,28 @@ import { setTaskStatus, startTaskTimer, stopTaskTimer } from '@/app/tasks/action
 import { describeAuditEvent, type AuditAction } from '@/lib/audit';
 import { formatTime, formatDuration } from '@/lib/time';
 import { rollupForTask, formatHumanDuration } from '@/lib/timer';
+import { humanDateLabel, BUSINESS_TIMEZONE } from '@/lib/dates';
 import { TaskTimerStrip } from './TaskTimerStrip';
 import AddNoteForm from './AddNoteForm';
 import ScheduleNextButton from './ScheduleNextButton';
 
 export const dynamic = 'force-dynamic';
 
+// Pinned to BUSINESS_TIMEZONE so server SSR + client hydration agree
+// regardless of the renderer's locale. UX Review §7.
 function formatDateTime(d: Date): string {
   return new Date(d).toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    timeZone: BUSINESS_TIMEZONE,
   });
 }
 
 function formatScheduledDate(d: Date | null): string | null {
   if (!d) return null;
-  return new Date(d).toISOString().slice(0, 10);
+  return humanDateLabel(new Date(d).toISOString().slice(0, 10));
 }
 
 export default async function TaskDetailPage({

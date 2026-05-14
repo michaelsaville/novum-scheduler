@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { setTaskStatus, startTaskTimer, stopTaskTimer } from '@/app/tasks/actions';
-import { dayBoundsUTC, todayISO } from '@/lib/dates';
+import { dayBoundsUTC, humanDateLabel, todayISO } from '@/lib/dates';
 import { formatTime, formatDuration } from '@/lib/time';
 import { getRunningTimer } from '@/lib/timer';
 import { RunningTimerBar } from '@/app/components/RunningTimerBar';
@@ -73,7 +73,7 @@ export default async function MePage() {
         <header>
           <h1 className="text-3xl font-semibold tracking-tight">Today</h1>
           <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-            {session.user.name} · {start.toDateString()}
+            {session.user.name} · {humanDateLabel(todayISO())}
           </p>
         </header>
 
@@ -161,9 +161,14 @@ type TaskCardProps = {
 };
 
 function TaskCard({ task, showDate, showQuickActions, isTimerRunning }: TaskCardProps) {
-  const dateLabel = task.scheduledDate
+  // scheduledDate is stored as UTC-midnight; the date-only ISO is the
+  // source of truth, so slicing toISOString is safe. humanDateLabel
+  // prints "Mon, Apr 27, 2026" which is more useful than YYYY-MM-DD
+  // on a phone glance. UX Review §7 + §17.
+  const dateISO = task.scheduledDate
     ? new Date(task.scheduledDate).toISOString().slice(0, 10)
     : null;
+  const dateLabel = dateISO ? humanDateLabel(dateISO) : null;
   const isDone = task.status === 'done';
 
   return (

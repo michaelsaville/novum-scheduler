@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
 
-const DISMISS_KEY = 'novum.install-hint.dismissed';
+const DISMISS_KEY = 'novum.install-hint.v2.dismissed';
 
 function isIosSafari(): boolean {
   if (typeof navigator === 'undefined') return false;
@@ -27,14 +28,26 @@ function isStandalone(): boolean {
 
 export default function InstallBanner() {
   const [show, setShow] = useState(false);
+  const pathname = usePathname();
+  // Don't pitch "install this app" before the user has signed in or
+  // chosen to use it. UX Review §6.
+  const onUnauthedRoute =
+    pathname === '/login' || pathname === '/offline' || pathname?.startsWith('/p/');
+  // /me is the only page with the fixed-bottom nav today. Tile above it
+  // so the banner doesn't overlap the Today / Account row.
+  const liftAboveBottomNav = pathname === '/me';
 
   useEffect(() => {
+    if (onUnauthedRoute) {
+      setShow(false);
+      return;
+    }
     if (!isIosSafari() || isStandalone()) return;
     try {
       if (window.localStorage.getItem(DISMISS_KEY) === '1') return;
     } catch {}
     setShow(true);
-  }, []);
+  }, [onUnauthedRoute]);
 
   function dismiss() {
     setShow(false);
@@ -46,7 +59,11 @@ export default function InstallBanner() {
   return (
     <div
       role="status"
-      className="fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md p-3 supports-[padding:max(0px)]:pb-[max(env(safe-area-inset-bottom),0.75rem)]"
+      className={
+        liftAboveBottomNav
+          ? 'fixed inset-x-0 bottom-[80px] z-50 mx-auto max-w-md p-3'
+          : 'fixed inset-x-0 bottom-0 z-50 mx-auto max-w-md p-3 supports-[padding:max(0px)]:pb-[max(env(safe-area-inset-bottom),0.75rem)]'
+      }
     >
       <div className="flex items-start gap-3 rounded-lg border border-neutral-200 bg-white p-3 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
         <span aria-hidden className="text-xl leading-none">📱</span>

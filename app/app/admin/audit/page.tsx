@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 import { prisma } from '@/lib/prisma';
 import { describeAuditEvent, type AuditAction } from '@/lib/audit';
+import { BUSINESS_TIMEZONE } from '@/lib/dates';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,6 +12,7 @@ function formatDateTime(d: Date): string {
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    timeZone: BUSINESS_TIMEZONE,
   });
 }
 
