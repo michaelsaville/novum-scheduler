@@ -213,33 +213,37 @@ function TaskCard({ task, showDate, showQuickActions, isTimerRunning }: TaskCard
         </div>
       </a>
       {showQuickActions && (
-        <div className="flex gap-2 border-t border-neutral-200 px-3 py-2 dark:border-neutral-800">
-          {/* Pending: only Start button — auto-flips status to in_progress + starts timer. */}
+        // Stack: primary CTA full-width 56px (gloved-finger reachable),
+        // secondaries collapsed into a small text-link row below. Per
+        // UX Review §3 — the primary action should dominate.
+        <div className="flex flex-col gap-1 border-t border-neutral-200 p-3 dark:border-neutral-800">
           {task.status === 'pending' && (
             <TimerButton taskId={task.id} action="start" label="▶ Start timer" primary />
           )}
-          {/* In progress: split based on whether *this* task is the running timer. */}
           {task.status === 'in_progress' && isTimerRunning && (
-            <>
-              <TimerButton taskId={task.id} action="stop" label="■ Stop timer" primary />
-              <StatusButton taskId={task.id} status="done" label="✓ Done" />
-            </>
+            <TimerButton taskId={task.id} action="stop" label="■ Stop timer" primary />
           )}
           {task.status === 'in_progress' && !isTimerRunning && (
-            <>
-              <TimerButton taskId={task.id} action="start" label="▶ Resume timer" primary />
-              <StatusButton taskId={task.id} status="done" label="✓ Done" />
-            </>
+            <TimerButton taskId={task.id} action="start" label="▶ Resume timer" primary />
           )}
           {task.status === 'done' && (
-            <StatusButton taskId={task.id} status="in_progress" label="Reopen" />
-          )}
-          {task.status !== 'done' && task.status !== 'blocked' && (
-            <StatusButton taskId={task.id} status="blocked" label="⏸ Blocked" />
+            <StatusButton taskId={task.id} status="in_progress" label="Reopen" primary />
           )}
           {task.status === 'blocked' && (
             <TimerButton taskId={task.id} action="start" label="▶ Resume timer" primary />
           )}
+
+          <div className="mt-1 flex items-center justify-center gap-4 text-sm text-neutral-500">
+            {task.status === 'in_progress' && (
+              <StatusButton taskId={task.id} status="done" label="Mark done" link />
+            )}
+            {task.status !== 'done' && task.status !== 'blocked' && (
+              <StatusButton taskId={task.id} status="blocked" label="Mark blocked" link />
+            )}
+            {task.status === 'blocked' && (
+              <StatusButton taskId={task.id} status="pending" label="Unblock" link />
+            )}
+          </div>
         </div>
       )}
     </article>
@@ -251,22 +255,26 @@ function StatusButton({
   status,
   label,
   primary = false,
+  link = false,
 }: {
   taskId: string;
   status: 'pending' | 'in_progress' | 'done' | 'blocked';
   label: string;
   primary?: boolean;
+  link?: boolean;
 }) {
   return (
-    <form action={setTaskStatus} className="inline">
+    <form action={setTaskStatus} className={link ? 'inline' : 'flex'}>
       <input type="hidden" name="taskId" value={taskId} />
       <input type="hidden" name="status" value={status} />
       <button
         type="submit"
         className={
-          primary
-            ? 'rounded bg-neutral-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white'
-            : 'rounded border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800'
+          link
+            ? 'text-sm text-neutral-500 underline-offset-4 hover:text-neutral-800 hover:underline dark:hover:text-neutral-200'
+            : primary
+              ? 'flex w-full min-h-[56px] items-center justify-center rounded bg-neutral-900 px-4 py-3 text-base font-semibold text-white hover:bg-neutral-800 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white'
+              : 'flex w-full min-h-[56px] items-center justify-center rounded border border-neutral-300 px-4 py-3 text-base hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800'
         }
       >
         {label}
@@ -288,14 +296,14 @@ function TimerButton({
 }) {
   const formAction = action === 'start' ? startTaskTimer : stopTaskTimer;
   return (
-    <form action={formAction} className="inline">
+    <form action={formAction} className="flex">
       <input type="hidden" name="taskId" value={taskId} />
       <button
         type="submit"
         className={
           primary
-            ? 'rounded bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-800'
-            : 'rounded border border-neutral-300 px-3 py-1.5 text-xs hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800'
+            ? 'flex w-full min-h-[56px] items-center justify-center rounded bg-emerald-700 px-4 py-3 text-base font-semibold text-white hover:bg-emerald-800'
+            : 'flex w-full min-h-[56px] items-center justify-center rounded border border-neutral-300 px-4 py-3 text-base hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800'
         }
       >
         {label}

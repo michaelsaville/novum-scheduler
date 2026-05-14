@@ -10,3 +10,25 @@ html,
 body {
   height: 100%;
 }
+
+/*
+ * Touch-viewport input baseline. iOS Safari auto-zooms on focus for
+ * any text-input under 16px. Forms inheriting `text-sm` (14px) from
+ * their <label> wrappers trigger the zoom mid-focus, which jolts the
+ * field-tech mid-tap. Bump to 16px on touch viewports; 14px on md+
+ * keeps the desk surface compact. Per UX Review §2.
+ */
+@layer base {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+  @media (min-width: 768px) {
+    input,
+    select,
+    textarea {
+      font-size: 14px;
+    }
+  }
+}
