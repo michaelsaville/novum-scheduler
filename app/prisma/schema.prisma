@@ -132,6 +132,7 @@ model Task {
   timeEntries      TimeEntry[]
   deficiencies     Deficiency[]  @relation("DeficiencySource")
   fixesDeficiency  Deficiency?   @relation("DeficiencyFix")
+  checklist        TaskChecklist?
 
   @@index([assignedInstallerId, scheduledDate])
   @@index([projectId])
@@ -179,6 +180,41 @@ model TimeEntry {
   // (userId, stoppedAt=null). Index covers it.
   @@index([userId, stoppedAt])
   @@index([taskId, startedAt])
+}
+
+/// Reusable checklist template. `items` is a JSON array of
+/// `{ id, label, required }` rows; the per-task instance copies this
+/// array at apply-time so future template edits don't retroactively
+/// invalidate finished work. Sprint 5 cut: all items implicitly
+/// required + free-form text only. Photo-required + signature kinds
+/// land in P1 once the client portal exists.
+model ChecklistTemplate {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  active      Boolean  @default(true)
+  items       Json     // [{ id, label, required }, ...]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  taskChecklists TaskChecklist[]
+}
+
+/// Per-task instance of a checklist. `items` is a snapshot of the
+/// template's items at apply-time, decorated with per-row state:
+/// `{ id, label, required, checkedAt?, checkedById? }`. The
+/// setTaskStatus close-out gate refuses `done` while any item with
+/// `required = true` is missing `checkedAt`.
+model TaskChecklist {
+  id         String   @id @default(cuid())
+  taskId     String   @unique
+  templateId String
+  items      Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  task     Task              @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  template ChecklistTemplate @relation(fields: [templateId], references: [id])
 }
 
 /// Punch-list item raised against a task that survives task closure.

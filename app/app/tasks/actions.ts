@@ -168,19 +168,32 @@ export async function setTaskStatus(formData: FormData) {
   if (!allowed) return;
   if (task.status === status) return;
 
-  // Close-out gate: refuse `done` while open functional/safety
-  // deficiencies remain. Cosmetic items can be waived separately.
-  // Silent no-op + revalidate so the deficiency list re-renders
-  // and the operator sees why the click "did nothing."
+  // Close-out gate: refuse `done` while
+  //   (a) any open functional/safety deficiencies remain, OR
+  //   (b) any required checklist items haven't been checked.
+  // Both surfaces re-render via revalidatePath so the operator sees
+  // why the click "did nothing."
   if (status === 'done') {
-    const blockers = await prisma.deficiency.count({
-      where: {
-        taskId: task.id,
-        status: 'open',
-        severity: { in: ['functional', 'safety'] },
-      },
-    });
-    if (blockers > 0) {
+    const [blockers, checklist] = await Promise.all([
+      prisma.deficiency.count({
+        where: {
+          taskId: task.id,
+          status: 'open',
+          severity: { in: ['functional', 'safety'] },
+        },
+      }),
+      prisma.taskChecklist.findUnique({
+        where: { taskId: task.id },
+        select: { items: true },
+      }),
+    ]);
+    type CheckItem = { required?: boolean; checkedAt?: string | null };
+    const uncheckedRequired = checklist
+      ? (checklist.items as unknown as CheckItem[]).filter(
+          (it) => it.required !== false && !it.checkedAt,
+        ).length
+      : 0;
+    if (blockers > 0 || uncheckedRequired > 0) {
       revalidatePath(`/tasks/${task.id}`);
       revalidatePath('/me');
       return;

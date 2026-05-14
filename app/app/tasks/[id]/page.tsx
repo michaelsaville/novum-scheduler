@@ -11,6 +11,8 @@ import AddNoteForm from './AddNoteForm';
 import ScheduleNextButton from './ScheduleNextButton';
 import AddDeficiencyForm from './AddDeficiencyForm';
 import DeficiencyItem, { type DeficiencyForUI } from './DeficiencyItem';
+import TaskChecklistPanel, { type TaskChecklistForUI } from './TaskChecklistPanel';
+import type { TaskChecklistItem } from '@/app/admin/checklists/actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,6 +75,9 @@ export default async function TaskDetailPage({
           },
         },
       },
+      checklist: {
+        include: { template: { select: { name: true } } },
+      },
     },
   });
 
@@ -131,6 +136,22 @@ export default async function TaskDetailPage({
         select: { id: true, name: true, color: true },
       })
     : [];
+
+  // Templates for the "Apply checklist" picker — schedulers/admins only.
+  const checklistTemplates = canSchedule && !task.checklist
+    ? await prisma.checklistTemplate.findMany({
+        where: { active: true },
+        orderBy: { name: 'asc' },
+        select: { id: true, name: true },
+      })
+    : [];
+
+  const checklistForUI: TaskChecklistForUI | null = task.checklist
+    ? {
+        templateName: task.checklist.template.name,
+        items: task.checklist.items as unknown as TaskChecklistItem[],
+      }
+    : null;
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-5 p-5">
@@ -218,6 +239,17 @@ export default async function TaskDetailPage({
           installers={installers}
         />
       )}
+
+      <section className="flex flex-col gap-3">
+        <h2 className="text-lg font-medium">Checklist</h2>
+        <TaskChecklistPanel
+          taskId={task.id}
+          checklist={checklistForUI}
+          templates={checklistTemplates}
+          canApply={canSchedule}
+          canCheck={canPostNote}
+        />
+      </section>
 
       <section className="flex flex-col gap-3">
         <div className="flex items-baseline justify-between gap-2">

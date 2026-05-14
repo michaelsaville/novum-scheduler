@@ -17,6 +17,12 @@ export type AuditAction =
   | 'deficiency.create'
   | 'deficiency.resolve'
   | 'deficiency.waive'
+  // Checklists
+  | 'checklist.template_create'
+  | 'checklist.template_delete'
+  | 'checklist.apply'
+  | 'checklist.item_check'
+  | 'checklist.item_uncheck'
   // Projects
   | 'project.create'
   | 'project.update'
@@ -105,6 +111,16 @@ export function describeAuditEvent(
       return 'resolved a deficiency';
     case 'deficiency.waive':
       return 'waived a cosmetic deficiency';
+    case 'checklist.template_create':
+      return 'created a checklist template';
+    case 'checklist.template_delete':
+      return 'removed a checklist template';
+    case 'checklist.apply':
+      return 'applied a checklist to the task';
+    case 'checklist.item_check':
+      return 'checked off a checklist item';
+    case 'checklist.item_uncheck':
+      return 'un-checked a checklist item';
     case 'project.create':
       return 'created the project';
     case 'project.update':
