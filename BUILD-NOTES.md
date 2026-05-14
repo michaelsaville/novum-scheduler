@@ -924,3 +924,351 @@ open the task screen first or pick an installer.
   (via the project link in the header), and Auto-schedule. Keep
   an eye on UX clutter as we add more (#10 + #16 leave an open
   toast pattern as an explicit polish item).
+
+---
+
+## 2026-05-14 — Sprint 5 (timer + deficiencies + checklists + email + portal + reports)
+
+**Trigger**: Operator asked for a feature comparison vs Athena PM
++ a UX review. Spawned two reviewers in parallel
+(`~/Notes/VibeCodeing Projects/Novum Scheduler/Feature Review vs
+Athena.md` + `UX Review.md`). Reviewers landed 6 P0 features and
+8 P0 UX items. Operator picked "full P0 set"; this session
+shipped the unioned 13 items as 9 dependency-ordered commits.
+
+**Reference product picked for Athena**: TIRA Software's "Athena"
+— Toronto-based residential-construction QC / handover /
+deficiency platform. Different vertical from Novum's graphic-
+install crew but the scheduling + inspection + deficiency +
+photo + portal overlap is real. Other Athenas (athenahealth,
+Athena Workflow) ruled out as wrong-vertical.
+
+### N1 — field-tech task timer (`edd0c0e`)
+- Operator-confirmed gap. Schema additive: `TimeEntry(taskId,
+  userId, startedAt, stoppedAt?, source, note)` with indexes on
+  `(userId, stoppedAt)` and `(taskId, startedAt)`. Single-active
+  per user — `stoppedAt = null` denotes the running entry.
+- Server actions in `app/tasks/actions.ts`: `startTaskTimer`
+  closes any other running entry for the same user before
+  creating the new one (silent — toast surface deferred), idem-
+  potent against double-tap on the same task, and auto-flips
+  `pending → in_progress` in the same transaction. Logs both
+  `timer.start` and (when status flipped) a synthetic
+  `task.status` audit event. `stopTaskTimer` is terminal — to
+  log more time the tech starts a new entry. Optional `taskId`
+  guard prevents racy stops from stale pages.
+- Audit kinds extended: `timer.start`, `timer.stop`.
+- New `lib/timer.ts` with pure helpers: `getRunningTimer`
+  (excludes >12h entries), `getStaleTimer` (only >12h),
+  `rollupForTask`, `formatHMS`, `formatHumanDuration`. Stale
+  entries excluded from the running-timer state so yesterday's
+  forgotten timer doesn't drive today's UI; banner UX deferred.
+- New `app/components/RunningTimerBar` (client, 1Hz tick) pinned
+  to the top of `/me` whenever a timer is running. Live
+  `H:MM:SS` counter + project + task title + Stop button. Tap
+  title → `/tasks/[id]`.
+- `/me` task cards: per-state primary CTA. Pending → `▶ Start
+  timer`. In-progress + running-here → `■ Stop timer`. In-
+  progress + not-running → `▶ Resume timer`. Blocked → `▶ Resume
+  timer`. Done → `Reopen`. Secondary actions (Mark done, Mark
+  blocked, Unblock) demoted to a small text-link row beneath
+  the primary.
+- `/tasks/[id]` gains a `TaskTimerStrip` above the status row:
+  live Stop when running, otherwise "Logged: Xh Ym across N
+  sessions" rollup + Start.
+
+**Why no paused-stack** (intentional divergence from TaskHub
+pattern): UX reviewer recommended pause-stack lifted from
+TaskHub; Feature reviewer recommended same. Chose UX reviewer's
+single-active simpler model — Novum techs are one-tech-one-task
+in the field; TaskHub's paused-stack solves rapid ticket
+context-switching, which doesn't apply here. The "stepped away
+for a part" case is handled by the daily rollup showing
+cumulative time across sessions.
+
+**Deferred** (timer follow-ups): stale-timer recovery banner on
+`/me`, admin `/admin/time-entries` edit page, "timer moved
+from X to Y" toast on auto-stop conflict.
+
+### N2 — touch + iOS focus-zoom sweep (`2105780`)
+- `globals.css` — new `@layer base` rule: `input, select,
+  textarea { font-size: 16px }` with `@media (min-width: 768px)`
+  override to 14px. Defeats iOS Safari's auto-zoom-on-focus
+  heuristic that was firing across ~10 forms inheriting
+  `text-sm` from their `<label>` wrappers. Single-file global
+  fix vs touching every form's className.
+- `/me` quick-action buttons restructured to primary CTA at
+  `min-h-[56px]` full-width text-base font-semibold (well above
+  the 44px iOS HIG minimum + reachable with gloved/wet finger),
+  secondaries demoted to text-links. `StatusButton` +
+  `TimerButton` signatures gained a `link` mode.
+
+### N3 — `/me` polish: sign-out + notes order (`5b60af5`)
+- **Sign-out moved off `/me` bottom nav into `/account` behind
+  a `<details>` reveal + warning copy.** One accidental thumb-
+  tap on a flaky-Wi-Fi customer site used to strand the tech on
+  `/login` with no autofill — exactly the worst time for session
+  loss. Bottom nav is now Today + Account only, both bumped to
+  `py-3` for taller targets. `/account` back-link points to
+  `/me` (was `/`).
+- `/tasks/[id]` notes flipped to `createdAt desc`; AddNoteForm
+  pinned ABOVE the timeline so the operator adds a note without
+  scrolling past 4+ phone screens of history. Append-only
+  schema; display order is independent.
+
+### N4 — board-card open + InstallBanner gating + date helpers (`25eee24`)
+- TimelineCard + TaskCard gained a small `↗` "Open task" link
+  next to the existing `×` unschedule pill. Tap = navigate;
+  `stopPropagation` keeps drag from starting on tap. Closes the
+  "drag is the only interaction" gap from the day board.
+- InstallBanner: now `usePathname`-gated. Hidden on `/login`,
+  `/offline`, and the new `/p/[token]` portal (pre-auth +
+  unauth surfaces shouldn't pitch "install this app"). On
+  `/me` the banner now sits at `bottom-[80px]` so it tiles
+  above the fixed bottom nav instead of overlapping it. Dismiss
+  key bumped from v1 → v2 so prior dismissals re-show once.
+- Date helpers adopted: `/me` header drops
+  `start.toDateString()` (renderer-locale) for `humanDateLabel
+  (todayISO())`. `/me` upcoming-task pill drops `YYYY-MM-DD` for
+  the human label. `/tasks/[id]` `formatDateTime` and
+  `formatScheduledDate` now pass `timeZone: BUSINESS_TIMEZONE`,
+  same fix on `/admin/audit`. Closes the latent UTC-drift hazard
+  flagged by the UX review.
+
+### N5 — deficiency / punch-list (`d3cb213`)
+**Lifted wholesale from InspectHub's 2026-05-10 deficiency
+model** — same pattern, same severity-driven fix windows.
+- Schema additive: `DeficiencySeverity` enum (`cosmetic`,
+  `functional`, `safety`), `DeficiencyStatus` enum (`open`,
+  `scheduled`, `fixed`, `waived`). `Deficiency(taskId,
+  raisedById, description, severity, status, dueBy, fixTaskId?,
+  resolvedAt?, resolvedById?, resolvedNote?)` with indexes on
+  `(status, dueBy)` and `(taskId)`. `dueBy` auto-computed:
+  safety = 24h, functional = 14d, cosmetic = 30d.
+  `DeficiencyPhoto(deficiencyId, kind='before'|'after', path,
+  width, height, sizeBytes)` mirrors NotePhoto exactly so the
+  sharp pipeline + `/uploads` volume don't change.
+- Server actions in `app/deficiencies/actions.ts`:
+  `createDeficiency` (description + severity + before-photos +
+  per-task auth), `resolveDeficiency` (status='fixed' +
+  resolvedAt + after-photos), `waiveDeficiency` (admin/
+  scheduler only, cosmetic-only — safety/functional must be
+  actually fixed per InspectHub policy).
+- Audit kinds extended: `deficiency.create`, `deficiency.resolve`,
+  `deficiency.waive`.
+- New `/api/deficiency-photos/[id]` route mirrors
+  `/api/photos/[id]` but routes auth through the
+  `Deficiency.task` chain.
+- **Close-out gate**: `setTaskStatus` now refuses transition
+  → done while any open functional/safety deficiencies remain.
+  Silent no-op + revalidate so the operator sees the open list
+  re-render and a "X open · blocks close-out" banner above the
+  deficiency section explains why.
+- `/tasks/[id]` gains a Deficiencies section between the timer
+  block and Notes. Per-item severity-coloured cards (red
+  safety, amber functional, neutral cosmetic), description,
+  raised-by + due-by (open) or resolved-by (closed),
+  before/after photo grid, inline Mark-fixed / Waive (cosmetic-
+  only) actions. New `AddDeficiencyForm` is a collapsible reveal
+  to keep the surface clean.
+
+**Deferred**: standalone `/deficiencies` admin page (cross-task
+aggregation) + spawn-fix-task button. The aging report (N9)
+covers the cross-task aggregate view for now.
+
+### N6 — checklist templates + per-task instances (`a06c0da`)
+- Schema additive: `ChecklistTemplate(name @unique, description?,
+  active, items Json)` with `items = [{ id, label, required }]`.
+  `TaskChecklist(taskId @unique, templateId, items Json)` is the
+  per-task snapshot of items + per-row state `{ checkedAt,
+  checkedById }`. Snapshot-at-apply-time so future template
+  edits don't retroactively invalidate finished work.
+- Sprint 5 cut: all items implicitly required + free-form text
+  only. Per-item `required` flag + photo-required + signature
+  kinds deferred to a later sprint (the report flagged those
+  for "after client portal exists").
+- Server actions in `app/admin/checklists/actions.ts`:
+  `createChecklistTemplate` (admin only — items parsed one-per-
+  line from textarea), `deleteChecklistTemplate` (hard-delete
+  when no instances exist; otherwise sets `active=false` to
+  preserve historical references), `applyChecklistToTask`
+  (scheduler/admin only — refuses if one is already applied),
+  `toggleChecklistItem` (assigned installer or scheduler/admin —
+  stamps `checkedAt` + `checkedById` on the JSON row).
+- Audit kinds: `checklist.template_create`, `.template_delete`,
+  `.apply`, `.item_check`, `.item_uncheck`.
+- **Close-out gate update**: `setTaskStatus` now ALSO refuses
+  → done when any required checklist item is unchecked.
+  Combined with the deficiency gate from N5: both must be
+  clean.
+- New `/admin/checklists` (admin only): list templates (active
+  + retired) with item count + usage count + retire/delete
+  button. NewTemplateForm: name + description + textarea (one
+  item per line).
+- `/tasks/[id]` gains a Checklist section between the timer
+  block and Deficiencies. When no checklist applied AND viewer
+  can schedule, shows an "Apply checklist:" template picker;
+  when applied, renders item rows with toggle checkboxes + "N
+  of M · K required left" rollup. Required-but-unchecked items
+  show a red asterisk.
+
+### N7 — Resend email infra + client status notifications (`1e62d18`)
+- New `lib/email.ts` — nodemailer transport wrapping the
+  PCC2K-standard Resend SMTP config (port 465 secure, user
+  literally `resend`, pass = `RESEND_API_KEY`, see
+  `reference_resend_smtp_config` memory). Graceful degrade: if
+  `RESEND_API_KEY` or `RESEND_FROM` is unset, `sendMail` logs
+  + returns `{ ok: false }` and never throws. Dev/test/pre-DNS
+  deploys behave like baseline.
+- New `lib/client-notify.ts` — `notifyTaskCompleted(taskId)` +
+  `notifyDeficiencyResolved(deficiencyId)`. Both fire-and-
+  forget (`void` Promise from caller); short-circuit silently
+  when project hasn't opted in. Email body embeds the portal
+  URL when `clientPortalToken` is set, omits otherwise.
+- Schema additive on `Project`: `clientEmail String?`,
+  `notifyClient Boolean default false`, `clientPortalToken
+  String? @unique` (pushed with `--accept-data-loss` for the
+  new unique index — all existing rows NULL, no actual data
+  loss).
+- Project actions extended: `updateProject` reads `clientEmail`
+  + `notifyClient`, refuses `notifyClient=true` without an
+  email (silent off would mislead). New
+  `generateClientPortalToken` (idempotent lazy-init — 32-char
+  URL-safe random from two `crypto.randomUUID()` concatenated
+  + dashes stripped + sliced) and `revokeClientPortalToken`.
+- EditProjectForm gains a "Client communication" sub-section
+  (email + opt-in checkbox).
+- Hooks wired: `setTaskStatus` (status → done) calls
+  `notifyTaskCompleted`. `resolveDeficiency` calls
+  `notifyDeficiencyResolved`. Both `void`d so SMTP latency
+  never blocks the operator tap.
+- **NOT fired**: task moves, day-shifts, comment posts. Too
+  noisy for a client-facing channel.
+- Dependency added: `nodemailer ^6.9.16` + `@types/nodemailer
+  ^6.4.16`. Docker build picks them up via the existing `npm
+  install --legacy-peer-deps`.
+
+### N8 — read-only client portal at `/p/[token]` (`786434d`)
+- New public route `/p/[token]/page.tsx` — server-rendered.
+  Pulls project + scheduled tasks + last 12 photos + open
+  deficiencies. Token validated by `Project.clientPortalToken`
+  uniqueness lookup; 404 on miss. **No session required** —
+  the token IS the auth, same model as `/api/ics/[token]`.
+- New `/api/p-photos/[id]?t=<token>` route — tokenized photo
+  serving for the portal. Validates that the requested
+  NotePhoto's task belongs to the token's project. Same risk
+  surface as `/api/ics/[token]`: anyone with the URL can read.
+  Cache-Control: `public, max-age=3600` (no identity-tied
+  invalidation needed).
+- `middleware.ts` matcher updated: negative lookahead now
+  excludes `p/` (mirroring the `api/ics` exclusion). Without
+  this the auth middleware would 307 the client into `/login`.
+- **Filter policy** (per Feature Review §3 P0.4):
+  - **Exposed**: project name + client, scheduled tasks (title +
+    date/time + status), recent photos, open deficiencies
+    (severity + description + target date).
+  - **NOT exposed**: installer names, internal notes, audit log,
+    time entries, hourly rates, checklists.
+  - Status copy translated for client-facing read: `in_progress`
+    → "in progress", `blocked` → "on hold".
+- Operator surface: project detail page gains a "Share with
+  client" section. When token unset → "Generate client portal
+  link" button. When set → revealed URL + Revoke button.
+
+### N9 — reports (`e4ec208`)
+- New `lib/csv.ts` — hand-rolled CSV writer (no dep). Quotes
+  cells containing comma/quote/CRLF, escapes internal quotes,
+  coerces null/Date. Single shared `csvResponse(filename,
+  headers, rows)` helper for the API routes.
+- `/reports` index page links three sub-reports.
+- `/reports/project-completion?projectId=…` — task list per
+  project with status, scheduled date, installer, estimated vs
+  actual minutes (derived from sum of stopped TimeEntry rows —
+  no denormalized rollup column), photo count, plus totals
+  footer.
+- `/reports/installer-load?days=28` — per-installer scheduled
+  vs actual hours over a configurable window. Variance column
+  flags over/under (red / emerald). On-time-completion % is
+  best-effort (uses `scheduledDate <= now()` as proxy for
+  actual-done timestamp; precise variant defers to v1.1).
+- `/reports/deficiency-aging` — every open deficiency sorted by
+  `dueBy asc`. Overdue rows highlighted red. Severity-coloured
+  pill. The Monday-morning catch-up screen.
+- CSV export per report at `/api/reports/<name>.csv`.
+- All routes admin/scheduler only — installer redirects to
+  `/me`.
+
+**PDF export deferred**: Feature Review specced
+`@react-pdf/renderer` (~150KB added dep + 30s+ render time at
+this scale). Browser print-to-PDF handles the snapshot use
+case — pages are designed for print rendering. Server-side PDF
+revisits when there's a concrete server-emit use case (e.g.
+attaching aging report to the next email digest).
+
+### Repo + push
+- Created `github.com/michaelsaville/novum-scheduler` as a
+  public repo (operator pick — matches the README's claim).
+- Pushed all 30 commits (Sprint 0 → Sprint 5) to
+  `origin/master`. `master` now tracks upstream.
+
+### Schema migrations applied this session
+All via the one-shot prisma container on
+`novum-scheduler_default` network:
+1. `TimeEntry` model + relations on `User` and `Task`
+2. `Deficiency` + `DeficiencyPhoto` models + enums + relations
+   on `User` and `Task`
+3. `ChecklistTemplate` + `TaskChecklist` + relation on `Task`
+4. `Project.clientEmail` + `Project.notifyClient` +
+   `Project.clientPortalToken @unique` (with
+   `--accept-data-loss` for the new unique index — no real
+   risk, all rows NULL)
+
+### Env vars added (operator-side activation TODO — none set yet)
+- `RESEND_API_KEY` — Resend SMTP API key. Without it,
+  `sendMail` silently no-ops. Get from Resend dashboard after
+  domain verification.
+- `RESEND_FROM` — `From:` header value, e.g. `Novum Designs
+  <updates@novum.pcc2k.com>`. Required for sendMail to attempt.
+- `PUBLIC_ORIGIN` — already used by ICS; reused by client
+  portal URL embedded in emails. Default
+  `https://novum.pcc2k.com` if unset.
+
+### Operator-side activation prerequisites (deferred)
+1. **Resend DNS**: verify `novum.pcc2k.com` (or chosen sender
+   domain) in Resend dashboard, add the three DNS records
+   (`MX send.`, `TXT SPF send.`, `TXT DKIM
+   resend._domainkey.`). SPF coexistence: merge into any
+   existing record per
+   `reference_resend_smtp_config` memory.
+2. Set `RESEND_API_KEY` + `RESEND_FROM` in `app/.env`,
+   restart compose.
+3. Smoke-test on the actual phone/iPad — service worker
+   caches aggressively. If "the changes don't appear",
+   hard-refresh (Cmd-Shift-R) or — for a home-screen PWA —
+   long-press → Remove App → re-add.
+
+### Deferred follow-ups (Phase-3 backlog)
+- Stale-timer recovery banner on `/me` for >12h running
+  entries (UX Review §1 follow-up)
+- Admin `/admin/time-entries` per-user week view + edit form
+- "Timer moved from X to Y" toast surface on auto-stop
+- Standalone `/deficiencies` admin page (cross-task
+  kanban: open / scheduled / fixed) + spawn-fix-task button
+- Per-item `required` flag on checklist templates + photo-
+  required + signature kinds
+- Server-rendered PDF reports
+- Bottom-nav contextual back across all pages (UX Review
+  §14) — kept per-page back links for now
+- Color picker (`<input type="color">` + swatch palette) —
+  Sprint 6 / P1 in the UX Review
+- "Recent" pill on `/me` cards using new `User.lastSeenAt`
+- Photo lightbox + 4-grid + HEIC viewer
+- Empty-state CTAs across dispatcher screens
+- `/account` calendar feed URL redaction + Reveal button
+- Audit log pagination (currently `take: 50`)
+- Stale Sprint 0 copy on `/projects` page
+- Half-hour slot snapping + drag-to-resize TimelineCards
+- Visual conflict outline on overlapping installer tasks
+- Asana JSON importer (`Project.externalId` already in schema)
+- Subcontractor `User.kind` enum
+- Labor / cost rollup once `User.hourlyRate` populates
