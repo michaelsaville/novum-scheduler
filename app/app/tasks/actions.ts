@@ -11,6 +11,7 @@ import {
 } from '@/lib/uploads';
 import { logAudit } from '@/lib/audit';
 import { sendPushToUser } from '@/lib/push';
+import { notifyTaskCompleted } from '@/lib/client-notify';
 import { nextAvailableForInstaller } from '@/lib/availability';
 import { formatTime, DEFAULT_DURATION_MIN } from '@/lib/time';
 import { humanDateLabel } from '@/lib/dates';
@@ -211,6 +212,13 @@ export async function setTaskStatus(formData: FormData) {
     entityId: task.id,
     metadata: { from: task.status, to: status },
   });
+
+  // Client-facing notification fires only on the done transition and
+  // only when the project has opted in. Fire-and-forget so SMTP latency
+  // never blocks the operator's tap.
+  if (status === 'done') {
+    void notifyTaskCompleted(task.id);
+  }
 
   revalidatePath('/me');
   revalidatePath(`/tasks/${task.id}`);

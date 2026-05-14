@@ -61,6 +61,8 @@ export default async function ProjectDetailPage({
             clientName: project.clientName,
             color: project.color,
             status: project.status,
+            clientEmail: project.clientEmail,
+            notifyClient: project.notifyClient,
           }}
         />
         <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-neutral-200 pt-3 dark:border-neutral-800">

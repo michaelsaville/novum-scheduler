@@ -10,6 +10,7 @@ import {
   PHOTO_ALLOWED_MIME,
 } from '@/lib/uploads';
 import { logAudit } from '@/lib/audit';
+import { notifyDeficiencyResolved } from '@/lib/client-notify';
 import type { DeficiencySeverity } from '@prisma/client';
 
 export type DeficiencyResult = { ok: boolean; error: string | null };
@@ -196,6 +197,10 @@ export async function resolveDeficiency(formData: FormData) {
     entityId: def.taskId,
     metadata: { deficiencyId: id, photoCount: processedPhotos.length },
   });
+
+  // Client-facing notification — fire-and-forget. Short-circuits when
+  // the project hasn't opted in.
+  void notifyDeficiencyResolved(id);
 
   revalidatePath(`/tasks/${def.taskId}`);
   revalidatePath('/deficiencies');

@@ -102,6 +102,17 @@ model Project {
   externalId     String?  // for Asana / future imports
   externalSource String?
   archivedAt     DateTime?
+  /// Single contact email for client-facing notifications + portal
+  /// access. Multi-contact is a Phase-3 concern.
+  clientEmail       String?
+  /// Master opt-in for client-facing email + portal updates. Off by
+  /// default — the operator turns it on per-project once the client
+  /// has agreed to receive updates.
+  notifyClient      Boolean  @default(false)
+  /// Lazy-init token for the public read-only client portal at
+  /// /p/[token]. Null until the operator generates it.
+  clientPortalToken String?  @unique
+
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

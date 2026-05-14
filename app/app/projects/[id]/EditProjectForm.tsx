@@ -12,6 +12,8 @@ type Props = {
     clientName: string | null;
     color: string | null;
     status: string;
+    clientEmail: string | null;
+    notifyClient: boolean;
   };
 };
 
@@ -40,6 +42,30 @@ export default function EditProjectForm({ project }: Props) {
           <option value="done">done</option>
         </select>
       </label>
+      <div className="flex flex-col gap-2 sm:col-span-2 border-t border-neutral-200 pt-3 dark:border-neutral-800">
+        <span className="text-sm font-medium">Client communication</span>
+        <input
+          name="clientEmail"
+          type="email"
+          placeholder="client@example.com"
+          defaultValue={project.clientEmail ?? ''}
+          className="rounded border border-neutral-300 bg-white px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-800"
+        />
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="notifyClient"
+            defaultChecked={project.notifyClient}
+            className="mt-1"
+          />
+          <span>
+            Email the client on task completions and resolved issues.
+            <span className="block text-xs text-neutral-500">
+              Set an email above before enabling.
+            </span>
+          </span>
+        </label>
+      </div>
       <div className="flex items-center gap-3 sm:col-span-2">
         <button type="submit" disabled={pending} className="rounded bg-neutral-900 px-3 py-2 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-white">
           {pending ? 'Saving…' : 'Save changes'}

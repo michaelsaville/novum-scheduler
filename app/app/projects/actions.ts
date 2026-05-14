@@ -81,6 +81,8 @@ export async function updateProject(
   const colorRaw = String(formData.get('color') ?? '').trim();
   const color = colorRaw === '' ? null : colorRaw;
   const status = String(formData.get('status') ?? '').trim();
+  const clientEmail = String(formData.get('clientEmail') ?? '').trim() || null;
+  const notifyClient = formData.get('notifyClient') === 'on';
 
   if (!id) return { ok: false, error: 'Missing project id.' };
   if (name.length < 1 || name.length > 120) {
@@ -93,22 +95,86 @@ export async function updateProject(
     return { ok: false, error: 'Color must be a 6-digit hex like #2563eb.' };
   }
   if (!isStatus(status)) return { ok: false, error: 'Invalid status.' };
+  // Light email validation — the SMTP path will surface real bounces.
+  if (clientEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clientEmail)) {
+    return { ok: false, error: 'Client email looks malformed.' };
+  }
+  // Refuse notifyClient=true without an email — silent off would
+  // mislead the operator into thinking emails will fire.
+  if (notifyClient && !clientEmail) {
+    return { ok: false, error: 'Set a client email before enabling notifications.' };
+  }
 
   await prisma.project.update({
     where: { id },
-    data: { name, clientName, color, status },
+    data: { name, clientName, color, status, clientEmail, notifyClient },
   });
   await logAudit({
     userId: session.user.id,
     action: 'project.update',
     entityType: 'project',
     entityId: id,
-    metadata: { name, status },
+    metadata: { name, status, notifyClient },
   });
 
   revalidatePath('/projects');
   revalidatePath(`/projects/${id}`);
   return { ok: true, error: null };
+}
+
+/**
+ * Lazy-generate a client-portal token. Idempotent: if one already
+ * exists, returns the existing token. Token is a 32-char base64url
+ * derived from crypto.randomUUID() shifts to keep it URL-safe.
+ */
+export async function generateClientPortalToken(formData: FormData) {
+  const session = await requireSchedulerOrAdmin();
+  if (!session) return;
+  const id = String(formData.get('id') ?? '');
+  if (!id) return;
+  const existing = await prisma.project.findUnique({
+    where: { id },
+    select: { clientPortalToken: true },
+  });
+  if (!existing) return;
+  if (existing.clientPortalToken) {
+    revalidatePath(`/projects/${id}`);
+    return;
+  }
+  // 32-char URL-safe random token. Two crypto.randomUUIDs concatenated,
+  // stripped of dashes, gives 64 hex chars; slice to 32 for a tidy URL.
+  const token = (crypto.randomUUID() + crypto.randomUUID()).replace(/-/g, '').slice(0, 32);
+  await prisma.project.update({
+    where: { id },
+    data: { clientPortalToken: token },
+  });
+  await logAudit({
+    userId: session.user.id,
+    action: 'project.update',
+    entityType: 'project',
+    entityId: id,
+    metadata: { clientPortalTokenGenerated: true },
+  });
+  revalidatePath(`/projects/${id}`);
+}
+
+export async function revokeClientPortalToken(formData: FormData) {
+  const session = await requireSchedulerOrAdmin();
+  if (!session) return;
+  const id = String(formData.get('id') ?? '');
+  if (!id) return;
+  await prisma.project.update({
+    where: { id },
+    data: { clientPortalToken: null },
+  });
+  await logAudit({
+    userId: session.user.id,
+    action: 'project.update',
+    entityType: 'project',
+    entityId: id,
+    metadata: { clientPortalTokenRevoked: true },
+  });
+  revalidatePath(`/projects/${id}`);
 }
 
 export async function deleteProject(formData: FormData) {
