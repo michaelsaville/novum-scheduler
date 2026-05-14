@@ -28,6 +28,19 @@ enum TaskStatus {
   blocked
 }
 
+enum DeficiencySeverity {
+  cosmetic
+  functional
+  safety
+}
+
+enum DeficiencyStatus {
+  open
+  scheduled
+  fixed
+  waived
+}
+
 model User {
   id           String   @id @default(cuid())
   username     String   @unique
@@ -46,6 +59,8 @@ model User {
   auditLogs         AuditLog[]
   pushSubscriptions PushSubscription[]
   timeEntries       TimeEntry[]
+  deficienciesRaised   Deficiency[] @relation("DeficiencyRaised")
+  deficienciesResolved Deficiency[] @relation("DeficiencyResolved")
 }
 
 model PushSubscription {
@@ -111,10 +126,12 @@ model Task {
   createdAt            DateTime   @default(now())
   updatedAt            DateTime   @updatedAt
 
-  project     Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  installer   User?   @relation("AssignedInstaller", fields: [assignedInstallerId], references: [id], onDelete: SetNull)
-  notes       Note[]
-  timeEntries TimeEntry[]
+  project          Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  installer        User?   @relation("AssignedInstaller", fields: [assignedInstallerId], references: [id], onDelete: SetNull)
+  notes            Note[]
+  timeEntries      TimeEntry[]
+  deficiencies     Deficiency[]  @relation("DeficiencySource")
+  fixesDeficiency  Deficiency?   @relation("DeficiencyFix")
 
   @@index([assignedInstallerId, scheduledDate])
   @@index([projectId])
@@ -162,6 +179,55 @@ model TimeEntry {
   // (userId, stoppedAt=null). Index covers it.
   @@index([userId, stoppedAt])
   @@index([taskId, startedAt])
+}
+
+/// Punch-list item raised against a task that survives task closure.
+/// Lifted from InspectHub's deficiency model. Severity drives the
+/// fix-window (safety = 24h, functional = 14d, cosmetic = 30d) and the
+/// task close-out gate refuses `done` while open functional/safety
+/// items remain. `fixTaskId` optionally points at the follow-up Task
+/// the scheduler spawned to resolve it.
+model Deficiency {
+  id           String              @id @default(cuid())
+  taskId       String              // task that surfaced it
+  raisedById   String              // user who raised it
+  description  String
+  severity     DeficiencySeverity  @default(functional)
+  status       DeficiencyStatus    @default(open)
+  dueBy        DateTime?           // computed from severity at create time
+  fixTaskId    String?  @unique    // optional follow-up Task; spawn-on-schedule
+  resolvedAt   DateTime?
+  resolvedById String?
+  resolvedNote String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  task       Task @relation("DeficiencySource", fields: [taskId], references: [id], onDelete: Cascade)
+  fixTask    Task? @relation("DeficiencyFix", fields: [fixTaskId], references: [id], onDelete: SetNull)
+  raisedBy   User @relation("DeficiencyRaised", fields: [raisedById], references: [id], onDelete: Restrict)
+  resolvedBy User? @relation("DeficiencyResolved", fields: [resolvedById], references: [id], onDelete: SetNull)
+  photos     DeficiencyPhoto[]
+
+  @@index([status, dueBy])
+  @@index([taskId])
+}
+
+/// Mirror of NotePhoto — same on-disk processing pipeline (sharp JPEG)
+/// and same `/api/photos/[id]` serving route reused. `kind` = 'before'
+/// captured at deficiency raise; 'after' captured at resolution.
+model DeficiencyPhoto {
+  id           String     @id @default(cuid())
+  deficiencyId String
+  kind         String     // 'before' | 'after'
+  path         String
+  width        Int
+  height       Int
+  sizeBytes    Int
+  createdAt    DateTime   @default(now())
+
+  deficiency Deficiency @relation(fields: [deficiencyId], references: [id], onDelete: Cascade)
+
+  @@index([deficiencyId])
 }
 
 model NotePhoto {

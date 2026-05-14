@@ -9,6 +9,8 @@ import { humanDateLabel, BUSINESS_TIMEZONE } from '@/lib/dates';
 import { TaskTimerStrip } from './TaskTimerStrip';
 import AddNoteForm from './AddNoteForm';
 import ScheduleNextButton from './ScheduleNextButton';
+import AddDeficiencyForm from './AddDeficiencyForm';
+import DeficiencyItem, { type DeficiencyForUI } from './DeficiencyItem';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,6 +60,19 @@ export default async function TaskDetailPage({
           },
         },
       },
+      deficiencies: {
+        // Open first (sorted by severity desc then dueBy asc), then
+        // resolved (most-recent first). Severity rank: safety > functional > cosmetic.
+        orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+        include: {
+          raisedBy: { select: { name: true } },
+          resolvedBy: { select: { name: true } },
+          photos: {
+            orderBy: { createdAt: 'asc' },
+            select: { id: true, kind: true, width: true, height: true },
+          },
+        },
+      },
     },
   });
 
@@ -96,6 +111,18 @@ export default async function TaskDetailPage({
   const canPostNote = role === 'admin' || role === 'scheduler' || isAssigned;
   const canSchedule = role === 'admin' || role === 'scheduler';
   const scheduledLabel = formatScheduledDate(task.scheduledDate);
+  const openBlockerCount = task.deficiencies.filter(
+    (d) => d.status === 'open' && (d.severity === 'functional' || d.severity === 'safety'),
+  ).length;
+  // Severity rank so the in-memory sort puts safety > functional > cosmetic
+  // within the same status group (Prisma orderBy can't express custom enum
+  // ordering cleanly).
+  const sevRank: Record<string, number> = { safety: 0, functional: 1, cosmetic: 2 };
+  const sortedDeficiencies = [...task.deficiencies].sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'open' ? -1 : 1;
+    if (a.severity !== b.severity) return (sevRank[a.severity] ?? 9) - (sevRank[b.severity] ?? 9);
+    return b.createdAt.getTime() - a.createdAt.getTime();
+  });
 
   const installers = canSchedule
     ? await prisma.user.findMany({
@@ -191,6 +218,48 @@ export default async function TaskDetailPage({
           installers={installers}
         />
       )}
+
+      <section className="flex flex-col gap-3">
+        <div className="flex items-baseline justify-between gap-2">
+          <h2 className="text-lg font-medium">
+            Deficiencies ({task.deficiencies.length})
+          </h2>
+          {openBlockerCount > 0 && task.status !== 'done' && (
+            <span className="text-xs font-medium text-red-700 dark:text-red-300">
+              {openBlockerCount} open · blocks close-out
+            </span>
+          )}
+        </div>
+        {sortedDeficiencies.length === 0 ? (
+          <p className="text-sm text-neutral-500">No deficiencies on this task.</p>
+        ) : (
+          <ol className="flex flex-col gap-2">
+            {sortedDeficiencies.map((d) => {
+              const ui: DeficiencyForUI = {
+                id: d.id,
+                description: d.description,
+                severity: d.severity,
+                status: d.status,
+                dueBy: d.dueBy ? d.dueBy.toISOString() : null,
+                resolvedAt: d.resolvedAt ? d.resolvedAt.toISOString() : null,
+                resolvedNote: d.resolvedNote,
+                raisedByName: d.raisedBy.name,
+                resolvedByName: d.resolvedBy?.name ?? null,
+                photos: d.photos,
+              };
+              return (
+                <DeficiencyItem
+                  key={d.id}
+                  d={ui}
+                  canResolve={canPostNote}
+                  canWaive={canSchedule}
+                />
+              );
+            })}
+          </ol>
+        )}
+        {canPostNote && <AddDeficiencyForm taskId={task.id} />}
+      </section>
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-medium">

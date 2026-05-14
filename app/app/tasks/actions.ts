@@ -168,6 +168,25 @@ export async function setTaskStatus(formData: FormData) {
   if (!allowed) return;
   if (task.status === status) return;
 
+  // Close-out gate: refuse `done` while open functional/safety
+  // deficiencies remain. Cosmetic items can be waived separately.
+  // Silent no-op + revalidate so the deficiency list re-renders
+  // and the operator sees why the click "did nothing."
+  if (status === 'done') {
+    const blockers = await prisma.deficiency.count({
+      where: {
+        taskId: task.id,
+        status: 'open',
+        severity: { in: ['functional', 'safety'] },
+      },
+    });
+    if (blockers > 0) {
+      revalidatePath(`/tasks/${task.id}`);
+      revalidatePath('/me');
+      return;
+    }
+  }
+
   await prisma.task.update({
     where: { id: task.id },
     data: { status },

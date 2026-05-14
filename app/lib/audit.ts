@@ -13,6 +13,10 @@ export type AuditAction =
   // Timer
   | 'timer.start'
   | 'timer.stop'
+  // Deficiencies
+  | 'deficiency.create'
+  | 'deficiency.resolve'
+  | 'deficiency.waive'
   // Projects
   | 'project.create'
   | 'project.update'
@@ -92,6 +96,15 @@ export function describeAuditEvent(
     }
     case 'timer.stop':
       return 'stopped the timer';
+    case 'deficiency.create': {
+      const sev = metadata?.severity as string | undefined;
+      const tail = sev ? ` (${sev})` : '';
+      return `raised a deficiency${tail}`;
+    }
+    case 'deficiency.resolve':
+      return 'resolved a deficiency';
+    case 'deficiency.waive':
+      return 'waived a cosmetic deficiency';
     case 'project.create':
       return 'created the project';
     case 'project.update':
